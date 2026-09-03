@@ -284,6 +284,7 @@ function buildAnalyticsValues(rollup, pipeline) {
   const year = latest.slice(0, 4);
   const ytdMonths = monthly.filter((m) => m.month.startsWith(`${year}-`));
   const ytd = periodSummary(ytdMonths);
+  const allTime = periodSummary(monthly);
   const products = aggregateProducts(
     rollup.productStats || {}, ytdMonths.map((m) => m.month)
   ).filter((p) => p.inVariantMaster && (p.revenue || p.cogs || p.units));
@@ -325,11 +326,16 @@ function buildAnalyticsValues(rollup, pipeline) {
     ["Units", pipeline.units || 0, "Awaiting recognition"], [],
     [`EXPENSE MIX — YTD ${year}`], ["Category", "PKR", "% of opex"],
     ...expenses.map(([category, value]) => [category, round2(value), pct(value, ytd.totalOpex)]),
-    [], [`TAX MIX — YTD ${year}`], ["Metric", "Value", "Notes"],
-    ["Output tax accrued", round2(ytd.outputTax), "Tax-aware posts only"],
-    ["Taxable revenue ex-tax", round2(ytd.taxableRevenue), "Sale has matching Tax row"],
-    ["Exempt / legacy-untracked revenue", round2(ytd.untrackedRevenue), "Includes older gross-booked history"],
-    ["Taxable mix %", pct(ytd.taxableRevenue, ytd.taxableRevenue + ytd.untrackedRevenue), "Use cautiously until all history is tax-aware"],
+    [], ["TAX MIX"], ["Metric", `YTD ${year}`, "All time", "Notes"],
+    ["Output tax accrued", round2(ytd.outputTax), round2(allTime.outputTax), "Tax-aware posts only"],
+    ["Taxable revenue ex-tax", round2(ytd.taxableRevenue), round2(allTime.taxableRevenue), "Sale has matching Tax row"],
+    ["Exempt / legacy-untracked revenue", round2(ytd.untrackedRevenue), round2(allTime.untrackedRevenue), "Includes non-Shopify and legacy gross history"],
+    [
+      "Taxable mix %",
+      pct(ytd.taxableRevenue, ytd.taxableRevenue + ytd.untrackedRevenue),
+      pct(allTime.taxableRevenue, allTime.taxableRevenue + allTime.untrackedRevenue),
+      "Shopify tax coverage versus all recognized revenue",
+    ],
     [], [`DELIVERY — YTD ${year}`], ["Metric", "Value", "Notes"],
     ["Courier orders", ytd.courierOrders, "Distinct tax-linked order references"],
     ["Delivery expense", round2(ytd.deliveryExp), "Ledger Expense / Delivery"],

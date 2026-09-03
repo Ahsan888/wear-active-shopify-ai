@@ -243,7 +243,7 @@ async function formatReports(sheets, spreadsheetId, meta, dashValues, analyticsV
       numberFormat(analyticsId, 7, 8, 1, 2, count)
     );
     const taxMixRow = findRow(analyticsValues, "Taxable mix %");
-    if (taxMixRow >= 0) requests.push(numberFormat(analyticsId, taxMixRow, taxMixRow + 1, 1, 2, percent, "PERCENT"));
+    if (taxMixRow >= 0) requests.push(numberFormat(analyticsId, taxMixRow, taxMixRow + 1, 1, 3, percent, "PERCENT"));
     for (const label of [
       "Output tax accrued",
       "Taxable revenue ex-tax",
@@ -252,7 +252,7 @@ async function formatReports(sheets, spreadsheetId, meta, dashValues, analyticsV
       "Delivery cost / courier order",
     ]) {
       const row = findRow(analyticsValues, label);
-      if (row >= 0) requests.push(numberFormat(analyticsId, row, row + 1, 1, 2, money));
+      if (row >= 0) requests.push(numberFormat(analyticsId, row, row + 1, 1, 3, money));
     }
     const courierOrdersRow = findRow(analyticsValues, "Courier orders");
     if (courierOrdersRow >= 0) {

@@ -149,7 +149,7 @@ Use the sections as a short action list:
 
 - **Pipeline:** demand still waiting for recognition.
 - **Expense mix:** where YTD operating spend is concentrated.
-- **Tax mix:** taxable revenue and output tax from tax-aware posts. “Exempt /
+- **Tax mix:** YTD and all-time taxable revenue and output tax from tax-aware posts. “Exempt /
   legacy-untracked” intentionally combines true exempt sales with older history that
   was posted gross before the current tax model; do not read it as confirmed exempt.
 - **Delivery:** Ledger Delivery spend and directional cost per courier order. Courier
