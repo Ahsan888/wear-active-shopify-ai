@@ -9,6 +9,9 @@ Your Google Sheet is now a **thin operating system**:
 | **Dashboard** | This month / last month / MoM / YTD health check + open pipeline |
 | **Monthly P&L** | One clean month-by-month operating table |
 | **Analytics** | Focus areas: pipeline, expenses, tax, delivery, products, trends |
+| **Shopify Analytics** | Shopify year-over-year economics, delivery routes, and annual top items |
+| **Manual Analytics** | Manual-entry year-over-year economics and annual top items |
+| **Other Sales Analytics** | Other Sales year-over-year economics and annual top items |
 | **Shopify Orders (LIVE)** | Incoming Shopify lines (pipeline + posted) |
 | **Ledger** | Official journal — do not edit casually |
 | **Variant Master** | SKUs + cost (stock sync later) |
@@ -161,7 +164,8 @@ Use the sections as a short action list:
   `delivery:*` tag as Courier or Booked ourselves (walk-in/self). Historical Shopify
   entries without a stored route remain clearly labeled Legacy / unclassified.
 - **Top sales by channel:** separate YTD top-10 item tables for Shopify, Manual, and
-  Other Sales. These do not feed or dilute the Variant Master-only bestseller tables.
+  Other Sales, including revenue, COGS, gross profit, gross margin, and units. These
+  do not feed or dilute the Variant Master-only bestseller tables.
 - **Expense mix:** where YTD operating spend is concentrated.
 - **Tax mix:** YTD and all-time taxable revenue and output tax from tax-aware posts. “Exempt /
   legacy-untracked” intentionally combines true exempt sales with older history that
@@ -177,6 +181,22 @@ Use the sections as a short action list:
   Variant Master SKUs.
 - **12-month trend:** net revenue, net profit, gross margin, and net margin without
   extra chart clutter.
+
+### Channel analytics sheets
+
+`Shopify Analytics`, `Manual Analytics`, and `Other Sales Analytics` use the same
+layout so channels can be compared consistently:
+
+- **Year-over-year performance:** gross collected, output tax, revenue ex-tax,
+  COGS, gross profit, gross margin, orders/sale entries, units, and AOV.
+- **Top items by year:** up to 10 items per year with a native Year filter plus
+  revenue, COGS, gross profit, gross margin, and units.
+- **Shopify delivery route:** an additional yearly Courier / Booked ourselves /
+  Legacy-unclassified split. New `delivery:*` tags flow into this automatically.
+
+Net profit is intentionally not allocated to a channel because Delivery and other
+operating expenses are recorded at company level. Channel profitability therefore
+means gross profit after product COGS.
 
 ### LIVE (useful columns)
 

@@ -114,7 +114,8 @@ function ensureSalesBucket(stats, key, month) {
   if (!stats[key]) stats[key] = { byMonth: {} };
   if (!stats[key].byMonth[month]) {
     stats[key].byMonth[month] = {
-      revenue: 0, units: 0, transactions: 0, orders: new Set(), items: {},
+      revenue: 0, tax: 0, cogs: 0, units: 0, transactions: 0,
+      orders: new Set(), items: {},
     };
   }
   return stats[key].byMonth[month];
@@ -125,9 +126,19 @@ function addSaleToBucket(bucket, orderKey, itemKey, itemLabel, revenue, units) {
   bucket.units += units;
   bucket.transactions += 1;
   if (orderKey) bucket.orders.add(orderKey);
-  if (!bucket.items[itemKey]) bucket.items[itemKey] = { label: itemLabel, revenue: 0, units: 0 };
+  if (!bucket.items[itemKey]) {
+    bucket.items[itemKey] = { label: itemLabel, revenue: 0, cogs: 0, units: 0 };
+  }
   bucket.items[itemKey].revenue += revenue;
   bucket.items[itemKey].units += units;
+}
+
+function addCogsToBucket(bucket, itemKey, itemLabel, cogs) {
+  bucket.cogs += cogs;
+  if (!bucket.items[itemKey]) {
+    bucket.items[itemKey] = { label: itemLabel, revenue: 0, cogs: 0, units: 0 };
+  }
+  bucket.items[itemKey].cogs += cogs;
 }
 
 /** Roll up Ledger into monthly P&L and decision-focused analytics structures. */
@@ -222,10 +233,22 @@ function rollupLedger(rows, header, catalogBySku = {}) {
     } else if (type === "tax") {
       bucket.outputTax += credit;
       bucket.grossCollected += credit;
+      ensureSalesBucket(channelStats, saleChannel(source, ref), month).tax += credit;
     } else if (type === "cogs") {
       bucket.cogs += debit;
       const product = ensureProduct(productStats, sku, description, catalogBySku);
       ensureProductMonth(product, month).cogs += debit;
+      const channel = saleChannel(source, ref);
+      const catalog = catalogBySku[sku] || {};
+      const itemLabel = catalog.product
+        ? `${catalog.product} (${sku})`
+        : cleanProductName(description) || sku || "Unknown";
+      addCogsToBucket(
+        ensureSalesBucket(channelStats, channel, month),
+        sku || itemLabel,
+        itemLabel,
+        debit
+      );
     } else if (type === "expense") {
       if (category.toLowerCase() === "delivery") bucket.deliveryExp += debit;
       else bucket.otherExp += debit;
@@ -355,17 +378,31 @@ function aggregateSalesStats(stats, months) {
     const items = {};
     for (const month of selected) {
       for (const [itemKey, item] of Object.entries(month.items)) {
-        if (!items[itemKey]) items[itemKey] = { label: item.label, revenue: 0, units: 0 };
+        if (!items[itemKey]) {
+          items[itemKey] = { label: item.label, revenue: 0, cogs: 0, units: 0 };
+        }
         items[itemKey].revenue += item.revenue;
+        items[itemKey].cogs += item.cogs;
         items[itemKey].units += item.units;
       }
     }
+    const revenue = sum(selected, (m) => m.revenue);
+    const cogs = sum(selected, (m) => m.cogs);
     result[key] = {
-      revenue: sum(selected, (m) => m.revenue),
+      revenue,
+      tax: sum(selected, (m) => m.tax),
+      grossCollected: revenue + sum(selected, (m) => m.tax),
+      cogs,
+      grossProfit: revenue - cogs,
+      grossMargin: pct(revenue - cogs, revenue),
       units: sum(selected, (m) => m.units),
       transactions: sum(selected, (m) => m.transactions),
       orders: sum(selected, (m) => m.orders.size),
-      items: Object.values(items).sort((a, b) => b.revenue - a.revenue),
+      items: Object.values(items).map((item) => ({
+        ...item,
+        grossProfit: item.revenue - item.cogs,
+        grossMargin: pct(item.revenue - item.cogs, item.revenue),
+      })).sort((a, b) => b.revenue - a.revenue),
     };
   }
   return result;
@@ -377,13 +414,89 @@ function buildChannelTopSalesRows(channel, items = [], year) {
     : `TOP ${channel} SALES — YTD ${year}`;
   return [
     [title],
-    ["Item", "Revenue ex-tax", "Units"],
+    ["Item", "Revenue ex-tax", "COGS", "Gross profit", "Gross margin %", "Units"],
     ...items.slice(0, 10).map((item, index) => [
       `${index + 1}. ${item.label}`,
       round2(item.revenue),
+      round2(item.cogs),
+      round2(item.grossProfit),
+      item.grossMargin,
       round2(item.units),
     ]),
   ];
+}
+
+function buildChannelAnalyticsValues(rollup, channel) {
+  const monthly = rollup.monthly || [];
+  const years = [...new Set(monthly.map((m) => m.month.slice(0, 4)))].sort();
+  const countLabel = channel === "Shopify" ? "Orders" : "Sale entries";
+  const annual = years.map((year) => ({
+    year,
+    summary: aggregateSalesStats(
+      rollup.channelStats,
+      monthly.filter((m) => m.month.startsWith(`${year}-`)).map((m) => m.month)
+    )[channel] || {},
+  }));
+  const rows = [
+    [`${channel.toUpperCase()} ANALYTICS — YEAR OVER YEAR`],
+    [
+      channel === "Shopify"
+        ? "Future delivery:* tags split Courier from Booked ourselves; older sales remain Legacy / unclassified."
+        : `${countLabel} are derived from Ledger rows with Source grouped as ${channel}.`,
+    ],
+    ["Operating expenses are company-level; channel profit shown here is gross profit after product COGS."],
+    [],
+    ["YEAR-OVER-YEAR PERFORMANCE"],
+    ["Year", "Gross collected", "Output tax", "Revenue ex-tax", "COGS", "Gross profit", "Gross margin %", countLabel, "Units", "AOV"],
+    ...annual.map(({ year, summary }) => [
+      Number(year),
+      round2(summary.grossCollected || 0),
+      round2(summary.tax || 0),
+      round2(summary.revenue || 0),
+      round2(summary.cogs || 0),
+      round2(summary.grossProfit || 0),
+      summary.grossMargin || 0,
+      channel === "Shopify" ? summary.orders || 0 : summary.transactions || 0,
+      round2(summary.units || 0),
+      round2(pct(summary.revenue || 0, channel === "Shopify" ? summary.orders : summary.transactions)),
+    ]),
+  ];
+
+  if (channel === "Shopify") {
+    rows.push(
+      [],
+      ["DELIVERY ROUTE BY YEAR"],
+      ["Year", "Route", "Revenue ex-tax", "Orders", "Units", "Revenue mix %"]
+    );
+    for (const year of years) {
+      const monthKeys = monthly.filter((m) => m.month.startsWith(`${year}-`)).map((m) => m.month);
+      const routes = aggregateSalesStats(rollup.deliveryRouteStats, monthKeys);
+      const totalRevenue = sum(Object.values(routes), (route) => route.revenue);
+      for (const route of ["Courier", "Booked ourselves", "Legacy / unclassified"]) {
+        const value = routes[route] || {};
+        rows.push([
+          Number(year), route, round2(value.revenue || 0), value.orders || 0,
+          round2(value.units || 0), pct(value.revenue || 0, totalRevenue),
+        ]);
+      }
+    }
+  }
+
+  rows.push(
+    [],
+    ["TOP ITEMS BY YEAR"],
+    ["Year", "Rank", "Item", "Revenue ex-tax", "COGS", "Gross profit", "Gross margin %", "Units"]
+  );
+  for (const { year, summary } of annual) {
+    for (const [index, item] of (summary.items || []).slice(0, 10).entries()) {
+      rows.push([
+        Number(year), index + 1, item.label, round2(item.revenue),
+        round2(item.cogs), round2(item.grossProfit), item.grossMargin,
+        round2(item.units),
+      ]);
+    }
+  }
+  return rows;
 }
 
 function buildAnalyticsValues(rollup, pipeline) {
@@ -536,5 +649,6 @@ function buildAnalyticsValues(rollup, pipeline) {
 
 module.exports = {
   PNL_HEADERS, rollupLedger, buildDashboardValues, buildAnalyticsValues,
+  buildChannelAnalyticsValues,
   monthKey, orderKeyFromRef, periodSummary,
 };

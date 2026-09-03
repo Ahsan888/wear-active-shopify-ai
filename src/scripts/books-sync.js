@@ -15,7 +15,14 @@ const {
   rollupLedger,
   buildDashboardValues,
   buildAnalyticsValues,
+  buildChannelAnalyticsValues,
 } = require("../books/reports");
+
+const CHANNEL_REPORTS = [
+  { title: "Shopify Analytics", channel: "Shopify" },
+  { title: "Manual Analytics", channel: "Manual" },
+  { title: "Other Sales Analytics", channel: "Other Sales" },
+];
 
 async function batchWrite(sheets, spreadsheetId, data) {
   for (let i = 0; i < data.length; i += 80) {
@@ -52,6 +59,35 @@ async function loadVariantCatalog(sheets, spreadsheetId) {
     if (cost > 0) costMap[sku] = cost;
   }
   return { costMap, catalogBySku };
+}
+
+async function ensureReportSheets(sheets, spreadsheetId, titles) {
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets.properties.title",
+  });
+  const existing = new Set(
+    (meta.data.sheets || []).map((sheet) => sheet.properties.title)
+  );
+  const missing = titles.filter((title) => !existing.has(title));
+  if (!missing.length) return;
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: missing.map((title) => ({
+        addSheet: {
+          properties: {
+            title,
+            gridProperties: {
+              rowCount: 1000,
+              columnCount: 26,
+              frozenRowCount: 1,
+            },
+          },
+        },
+      })),
+    },
+  });
 }
 
 function repeatFormat(sheetId, rowStart, rowEnd, colStart, colEnd, format) {
@@ -96,7 +132,15 @@ function endOfSection(values, headerRow) {
   return end;
 }
 
-async function formatReports(sheets, spreadsheetId, meta, dashValues, analyticsValues, pnlRowCount) {
+async function formatReports(
+  sheets,
+  spreadsheetId,
+  meta,
+  dashValues,
+  analyticsValues,
+  pnlRowCount,
+  channelReportValues
+) {
   const byTitle = (title) => meta.data.sheets.find((s) => s.properties.title === title);
   const dashSheet = byTitle("Dashboard");
   const pnlSheet = byTitle("Monthly P&L");
@@ -104,6 +148,12 @@ async function formatReports(sheets, spreadsheetId, meta, dashValues, analyticsV
   const dashId = dashSheet?.properties.sheetId;
   const pnlId = pnlSheet?.properties.sheetId;
   const analyticsId = analyticsSheet?.properties.sheetId;
+  const channelSheets = CHANNEL_REPORTS.map(({ title, channel }) => ({
+    title,
+    channel,
+    sheet: byTitle(title),
+    values: channelReportValues[channel],
+  }));
   const requests = [];
   const money = "#,##0.00;[Red]-#,##0.00";
   const percent = "0.0%;[Red]-0.0%";
@@ -124,7 +174,12 @@ async function formatReports(sheets, spreadsheetId, meta, dashValues, analyticsV
     verticalAlignment: "MIDDLE",
   };
 
-  for (const sheet of [dashSheet, pnlSheet, analyticsSheet].filter(Boolean)) {
+  for (const sheet of [
+    dashSheet,
+    pnlSheet,
+    analyticsSheet,
+    ...channelSheets.map((report) => report.sheet),
+  ].filter(Boolean)) {
     const sheetId = sheet.properties.sheetId;
     requests.push(repeatFormat(sheetId, 0, 300, 0, 26, {}));
   }
@@ -274,8 +329,9 @@ async function formatReports(sheets, spreadsheetId, meta, dashValues, analyticsV
     for (let row = 0; row < analyticsValues.length; row++) {
       if (analyticsValues[row][0] !== "Item") continue;
       const end = endOfSection(analyticsValues, row);
-      requests.push(numberFormat(analyticsId, row + 1, end, 1, 2, money));
-      requests.push(numberFormat(analyticsId, row + 1, end, 2, 3, count));
+      requests.push(numberFormat(analyticsId, row + 1, end, 1, 4, money));
+      requests.push(numberFormat(analyticsId, row + 1, end, 4, 5, percent, "PERCENT"));
+      requests.push(numberFormat(analyticsId, row + 1, end, 5, 6, count));
     }
     if (expenseHeader >= 0) {
       const end = endOfSection(analyticsValues, expenseHeader);
@@ -326,6 +382,79 @@ async function formatReports(sheets, spreadsheetId, meta, dashValues, analyticsV
     const courierOrdersRow = findRow(analyticsValues, "Courier orders");
     if (courierOrdersRow >= 0) {
       requests.push(numberFormat(analyticsId, courierOrdersRow, courierOrdersRow + 1, 1, 2, count));
+    }
+  }
+
+  for (const report of channelSheets) {
+    const sheetId = report.sheet?.properties.sheetId;
+    const values = report.values || [];
+    if (sheetId == null || !values.length) continue;
+    requests.push(
+      { updateSheetProperties: { properties: { sheetId, gridProperties: { frozenRowCount: 1, frozenColumnCount: 1 } }, fields: "gridProperties.frozenRowCount,gridProperties.frozenColumnCount" } },
+      repeatFormat(sheetId, 0, 1, 0, 10, titleFormat),
+      dimensionWidth(sheetId, 0, 1, 85),
+      dimensionWidth(sheetId, 1, 2, 170),
+      dimensionWidth(sheetId, 2, 3, 320),
+      dimensionWidth(sheetId, 3, 10, 125)
+    );
+    for (const prefix of [
+      "YEAR-OVER-YEAR PERFORMANCE",
+      "DELIVERY ROUTE BY YEAR",
+      "TOP ITEMS BY YEAR",
+    ]) {
+      const row = findRow(values, prefix);
+      if (row >= 0) {
+        requests.push(repeatFormat(sheetId, row, row + 1, 0, 10, sectionFormat));
+      }
+    }
+    for (let row = 0; row < values.length; row++) {
+      if (values[row][0] === "Year") {
+        requests.push(repeatFormat(sheetId, row, row + 1, 0, 10, headerFormat));
+      }
+    }
+    const annualHeader = values.findIndex(
+      (row) => row[0] === "Year" && row[1] === "Gross collected"
+    );
+    const routeHeader = values.findIndex(
+      (row) => row[0] === "Year" && row[1] === "Route"
+    );
+    const topHeader = values.findIndex(
+      (row) => row[0] === "Year" && row[1] === "Rank"
+    );
+    if (annualHeader >= 0) {
+      const end = endOfSection(values, annualHeader);
+      requests.push(numberFormat(sheetId, annualHeader + 1, end, 0, 1, "0"));
+      requests.push(numberFormat(sheetId, annualHeader + 1, end, 1, 6, money));
+      requests.push(numberFormat(sheetId, annualHeader + 1, end, 6, 7, percent, "PERCENT"));
+      requests.push(numberFormat(sheetId, annualHeader + 1, end, 7, 9, count));
+      requests.push(numberFormat(sheetId, annualHeader + 1, end, 9, 10, money));
+    }
+    if (routeHeader >= 0) {
+      const end = endOfSection(values, routeHeader);
+      requests.push(numberFormat(sheetId, routeHeader + 1, end, 0, 1, "0"));
+      requests.push(numberFormat(sheetId, routeHeader + 1, end, 2, 3, money));
+      requests.push(numberFormat(sheetId, routeHeader + 1, end, 3, 5, count));
+      requests.push(numberFormat(sheetId, routeHeader + 1, end, 5, 6, percent, "PERCENT"));
+    }
+    if (topHeader >= 0) {
+      const end = endOfSection(values, topHeader);
+      requests.push(numberFormat(sheetId, topHeader + 1, end, 0, 2, "0"));
+      requests.push(numberFormat(sheetId, topHeader + 1, end, 3, 6, money));
+      requests.push(numberFormat(sheetId, topHeader + 1, end, 6, 7, percent, "PERCENT"));
+      requests.push(numberFormat(sheetId, topHeader + 1, end, 7, 8, count));
+      requests.push({
+        setBasicFilter: {
+          filter: {
+            range: {
+              sheetId,
+              startRowIndex: topHeader,
+              endRowIndex: end,
+              startColumnIndex: 0,
+              endColumnIndex: 8,
+            },
+          },
+        },
+      });
     }
   }
 
@@ -577,10 +706,25 @@ async function main() {
     alerts
   );
   const analyticsValues = buildAnalyticsValues(rollup, pipelineSummary);
+  const channelReportValues = Object.fromEntries(
+    CHANNEL_REPORTS.map(({ channel }) => [
+      channel,
+      buildChannelAnalyticsValues(rollup, channel),
+    ])
+  );
 
   if (!apply) {
     console.log("Sample posts:", out.slice(0, 6));
     console.log(`Monthly P&L rows: ${rollup.monthlyRows.length}`);
+    console.log(
+      "Channel report rows:",
+      Object.fromEntries(
+        Object.entries(channelReportValues).map(([channel, values]) => [
+          channel,
+          values.length,
+        ])
+      )
+    );
     console.log("Dry-run only. Re-run with --apply.");
     return;
   }
@@ -615,6 +759,12 @@ async function main() {
     await batchWrite(sheets, spreadsheetId, morePosted);
   }
 
+  await ensureReportSheets(
+    sheets,
+    spreadsheetId,
+    CHANNEL_REPORTS.map((report) => report.title)
+  );
+
   // Clear & write reports (RAW so large numbers aren't parsed as dates)
   await sheets.spreadsheets.values.clear({
     spreadsheetId,
@@ -637,6 +787,19 @@ async function main() {
     valueInputOption: "RAW",
     requestBody: { values: analyticsValues },
   });
+
+  for (const { title, channel } of CHANNEL_REPORTS) {
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId,
+      range: `'${title}'!A:Z`,
+    });
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `'${title}'!A1`,
+      valueInputOption: "RAW",
+      requestBody: { values: channelReportValues[channel] },
+    });
+  }
 
   await sheets.spreadsheets.values.clear({
     spreadsheetId,
@@ -661,10 +824,13 @@ async function main() {
     meta,
     dashValues,
     analyticsValues,
-    rollup.monthlyRows.length + 1
+    rollup.monthlyRows.length + 1,
+    channelReportValues
   );
 
-  console.log("Rebuilt Dashboard, Monthly P&L, Analytics.");
+  console.log(
+    "Rebuilt Dashboard, Monthly P&L, Analytics, and channel analytics."
+  );
 }
 
 function colLetter(n) {
