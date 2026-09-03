@@ -1,7 +1,8 @@
 {
   "name": "wear-active-shopify-ai",
   "version": "1.0.0",
-  "description": "Natural-language Shopify catalog ops for Wear Active",
+  "private": true,
+  "description": "Wear Active internal monorepo: Shopify Admin ops, Sheets books sync, and AI photo editor",
   "main": "src/shopify/client.js",
   "scripts": {
     "products:list": "node src/scripts/list-products.js",
@@ -53,8 +54,8 @@
     "shopify",
     "wear-active"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": "Wear Active",
+  "license": "UNLICENSED",
   "type": "commonjs",
   "dependencies": {
     "dotenv": "^17.4.2",

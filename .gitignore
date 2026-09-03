@@ -1,22 +1,31 @@
+# Dependencies
 node_modules/
+
+# Secrets — never commit
 .env
 .env.local
 .env.*
 !.env.example
-.DS_Store
-backups/
-*.log
 google-service-account.json
 *-service-account.json
 credentials*.json
+*.pem
 
-# Python/editor environment
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.log
+backups/
+.cursor/
+
+# Python
 .venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.mypy_cache/
 
-# Bulk photo editor working data and generated assets
+# Bulk photo editor — local working data & generated assets only
 wear-active-editor/.temp_images/
 wear-active-editor/input/
 wear-active-editor/photos/
@@ -26,6 +35,4 @@ wear-active-editor/output/
 wear-active-editor/output-done/
 wear-active-editor/shopify/
 wear-active-editor/failed.txt
-
-# Local IDE planning state
-.cursor/
+wear-active-editor/**/.DS_Store

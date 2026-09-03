@@ -1,98 +1,140 @@
 # Wear Active Shopify AI
 
-Internal operations toolkit for Wear Active. This repository connects Shopify,
-Google Sheets, Apps Script, and an AI-assisted product photo workflow.
+Private monorepo for Wear Active operations: Shopify Admin tooling, Google Sheets
+bookkeeping sync, order webhooks, and an AI-assisted bulk product photo editor.
 
-## What is included
+## Why one repo (not two)
 
-- Shopify Admin GraphQL client and catalog/inventory utilities
-- Google Sheets client and bookkeeping sync
-- Ledger-driven Dashboard, Monthly P&L, and Analytics reports
-- Shopify order webhook for the `Shopify Orders (LIVE)` sheet
-- Bulk product photo editor powered by OpenAI image generation
+`wear-active-editor/` lives **inside** this repo on purpose:
+
+| Approach | Verdict |
+|---|---|
+| **Monorepo (current)** | One clone, one private GitHub repo, shared brand context. Node books tools and the Python photo pipeline stay separate packages but ship together. |
+| Separate repos | Extra access control and version drift for little gain on a small internal team. |
+
+Keep media, API keys, and generated assets **out of Git** (already ignored). Only
+source code, prompts, docs, and a small visual reference stay in the repo.
+
+## What's included
+
+| Area | Path | Role |
+|---|---|---|
+| Shopify Admin client | `src/shopify/` | GraphQL auth + catalog/inventory helpers |
+| Google Sheets client | `src/sheets/` | Service-account access to WA Athleisure Stock |
+| Books engine | `src/books/` + `src/scripts/books-*.js` | LIVE → Ledger → Dashboard / P&L / Analytics |
+| Inventory / SKU ops | `src/scripts/` | Align SKUs, set stock, Variant Master helpers |
+| Order webhook | `apps-script/shopify-webhook.js` | Shopify → `Shopify Orders (LIVE)` |
+| Photo editor | `wear-active-editor/` | OpenAI image edit + local WebP conversion |
+| Operating docs | `docs/` | Setup + books SOP |
+
+## Quick start (Shopify + books)
+
+```bash
+git clone <YOUR_GITHUB_REPO_URL>
+cd wear-active-shopify-ai
+cp .env.example .env
+npm ci
+```
+
+1. Fill `.env` (see [docs/SETUP.md](docs/SETUP.md)).
+2. Place the Google service-account JSON at the path in `.env` (default
+   `./google-service-account.json`) and share the spreadsheet with that account
+   as Editor.
+3. Smoke-test:
+
+```bash
+npm run shopify:ping
+npm run sheets:info
+npm run books:sync          # dry-run
+npm run books:sync:apply    # post + rebuild reports
+```
+
+Full accounting workflow: [docs/BOOKS-SOP.md](docs/BOOKS-SOP.md).
+
+## Quick start (photo editor)
+
+```bash
+cd wear-active-editor
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env        # add OPENAI_API_KEY
+python3 bulk_photo_editor.py --test
+```
+
+Details: [wear-active-editor/README.md](wear-active-editor/README.md).
 
 ## Repository layout
 
 ```text
 .
-├── apps-script/              # Shopify → Google Sheets webhook
-├── docs/                     # Operating procedures
+├── LICENSE
+├── README.md                 # this file
+├── package.json              # Node scripts for Shopify + Sheets
+├── .env.example              # Shopify / Sheets / Meta placeholders
+├── apps-script/
+│   └── shopify-webhook.js    # deploy as Apps Script web app
+├── docs/
+│   ├── SETUP.md              # credentials & first-run checklist
+│   └── BOOKS-SOP.md          # tax, recognition, weekly sync
 ├── src/
-│   ├── books/                # Recognition, tax, and reporting logic
-│   ├── scripts/              # Operational command-line scripts
+│   ├── books/                # recognition, tax, reports
+│   ├── scripts/              # CLI entrypoints (npm run …)
 │   ├── sheets/               # Google Sheets client
-│   └── shopify/              # Shopify Admin API client
-└── wear-active-editor/       # Bulk product photo editor
+│   └── shopify/              # Shopify Admin GraphQL client
+└── wear-active-editor/       # Python bulk photo pipeline
+    ├── bulk_photo_editor.py
+    ├── prompt.txt
+    ├── requirements.txt
+    ├── references/           # small committed style reference(s)
+    └── README.md
 ```
 
-The editor's source photos, generated images, virtual environment, API keys,
-Node dependencies, and Google credentials remain local and are intentionally
-excluded from Git.
+Local-only under the editor (gitignored): `input/`, `photos/`, `gpt_output/`,
+`webp_output/`, `output/`, `shopify/`, `.venv/`, `.env`.
 
-## Requirements
+## Useful npm scripts
 
-- Node.js 18 or newer
-- npm
-- Python 3.10 or newer for the photo editor
-- A Shopify app with Admin API access
-- A Google Cloud service account with access to the accounting spreadsheet
-- An OpenAI API key for AI photo editing
+| Script | Purpose |
+|---|---|
+| `shopify:ping` | Verify Admin API credentials |
+| `sheets:info` | Verify Sheets access |
+| `shopify:align-skus` | Align Shopify SKUs to Variant Master (`--apply` to write) |
+| `books:sync` | Dry-run LIVE → Ledger + reports |
+| `books:sync:apply` | Apply posting + rebuild Dashboard / P&L / Analytics |
+| `books:hygiene` | Ledger date / category cleanup helpers |
+| `books:archive` | Archive noisy sheet tabs |
 
-## Shopify and books setup
-
-```bash
-cp .env.example .env
-npm ci
-```
-
-Fill `.env` with Shopify, Google Sheets, and optional Meta credentials. Place the
-Google service-account file at the configured local path and share the target
-spreadsheet with that service account as an Editor.
-
-Useful commands:
-
-```bash
-npm run shopify:ping
-npm run sheets:info
-npm run books:sync
-npm run books:sync:apply
-```
-
-`books:sync` is a dry run. `books:sync:apply` can update LIVE enrichment fields,
-post newly recognized sales to the Ledger, and rebuild the reporting tabs.
-
-See [docs/BOOKS-SOP.md](docs/BOOKS-SOP.md) for the accounting workflow, tax rules,
-recognition rules, and report definitions.
+Some `package.json` script names refer to one-off catalog scripts that may not
+exist in every checkout; the books and client scripts above are the supported
+surface.
 
 ## Shopify webhook
 
-Deploy `apps-script/shopify-webhook.js` as a Google Apps Script web app, then add
-the deployed URL to the relevant Shopify order webhooks. The webhook updates the
-LIVE order pipeline; the Node books sync remains the source of truth for Ledger
-posting and report rebuilding.
+1. Copy `apps-script/shopify-webhook.js` into the spreadsheet’s Apps Script project.
+2. Deploy as a **Web app** (execute as you, access: anyone).
+3. In Shopify → Settings → Notifications → Webhooks, point:
 
-## Bulk photo editor
+| Event | URL suffix |
+|---|---|
+| Order creation | `?topic=orders_create` |
+| Order updated | `?topic=orders_updated` |
+| Order cancellation | `?topic=orders_cancelled` |
 
-```bash
-cd wear-active-editor
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-python3 bulk_photo_editor.py --test
-```
-
-See [wear-active-editor/README.md](wear-active-editor/README.md) for folder usage,
-production runs, and local-only WebP conversion.
+The webhook only updates LIVE. Ledger posting stays on `npm run books:sync:apply`.
 
 ## Security
 
-Never commit `.env` files, Shopify credentials, OpenAI keys, Google service-account
-JSON, customer data, source photography, or generated production assets. Rotate a
-credential immediately if it is ever committed or shared outside the authorized
-team.
+**Do not commit:**
+
+- `.env` / `.env.local`
+- `google-service-account.json` or any `*-service-account.json`
+- Shopify / Meta / OpenAI tokens
+- Customer exports, source photography, or generated catalog assets
+
+If a secret is ever pushed, rotate it immediately and scrub history before the
+repo is shared further.
 
 ## License
 
-Private internal software. The package metadata currently declares ISC; confirm
-licensing terms before distributing any part of this repository.
+Proprietary — see [LICENSE](LICENSE). Internal Wear Active use only.

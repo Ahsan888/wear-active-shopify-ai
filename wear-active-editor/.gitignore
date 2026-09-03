@@ -1,0 +1,15 @@
+# Local-only (reinforced by repo root .gitignore)
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.temp_images/
+input/
+photos/
+gpt_output/
+webp_output/
+output/
+output-done/
+shopify/
+failed.txt
+.DS_Store
