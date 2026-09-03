@@ -76,7 +76,8 @@ Same as walk-in, but tag **`delivery:self`**.
 
 ### E) Other Sales sheet
 
-Only if it never touches Shopify. Fill the row and set **Tax Chargeable** = `Y` or `N`.
+Only if it never touches Shopify. Fill the row and tick **Tax Chargeable** when
+tax applies. The checkbox stores `Y` when checked and `N` when unchecked.
 
 ### F) Quick Manual Sale
 

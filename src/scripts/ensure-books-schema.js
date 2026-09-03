@@ -91,8 +91,10 @@ async function main() {
     range: "'Other Sales'!1:1",
   });
   const oh = (other.data.values?.[0] || []).map(String);
+  let taxChargeableCol = oh.indexOf("Tax Chargeable") + 1;
   if (!oh.includes("Tax Chargeable")) {
     const col = oh.length + 1;
+    taxChargeableCol = col;
     await sheets.spreadsheets.values.update({
       spreadsheetId,
       range: `'Other Sales'!${colToA1(col)}1`,
@@ -102,6 +104,57 @@ async function main() {
     console.log("Added Other Sales Tax Chargeable");
   } else {
     console.log("Other Sales Tax Chargeable already present");
+  }
+
+  const sheetMeta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: "sheets.properties(sheetId,title)",
+  });
+  const otherSheetId = sheetMeta.data.sheets.find(
+    (sheet) => sheet.properties.title === "Other Sales"
+  )?.properties.sheetId;
+  if (otherSheetId != null && taxChargeableCol > 0) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            setDataValidation: {
+              range: {
+                sheetId: otherSheetId,
+                startRowIndex: 1,
+                startColumnIndex: taxChargeableCol - 1,
+                endColumnIndex: taxChargeableCol,
+              },
+              rule: {
+                condition: {
+                  type: "BOOLEAN",
+                  values: [
+                    { userEnteredValue: "Y" },
+                    { userEnteredValue: "N" },
+                  ],
+                },
+                strict: true,
+                showCustomUi: true,
+              },
+            },
+          },
+          {
+            updateDimensionProperties: {
+              range: {
+                sheetId: otherSheetId,
+                dimension: "COLUMNS",
+                startIndex: taxChargeableCol - 1,
+                endIndex: taxChargeableCol,
+              },
+              properties: { pixelSize: 125 },
+              fields: "pixelSize",
+            },
+          },
+        ],
+      },
+    });
+    console.log("Other Sales Tax Chargeable checkboxes ensured (Y/N)");
   }
 
   // LIVE: extend schema — write new headers after last unique col, remove dup line_uid conceptually by not using col Y
