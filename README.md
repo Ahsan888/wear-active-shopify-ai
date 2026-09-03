@@ -104,6 +104,10 @@ Local-only under the editor (gitignored): `input/`, `photos/`, `gpt_output/`,
 | `books:sync:apply` | Apply posting + rebuild Dashboard / P&L / Analytics |
 | `books:hygiene` | Ledger date / category cleanup helpers |
 | `books:archive` | Archive noisy sheet tabs |
+| `stock:low` | Dry-run: list variants with 1 unit left |
+| `stock:low:send` | Email that low-stock report |
+
+Low-stock setup: [docs/LOW-STOCK-ALERTS.md](docs/LOW-STOCK-ALERTS.md).
 
 Some `package.json` script names refer to one-off catalog scripts that may not
 exist in every checkout; the books and client scripts above are the supported

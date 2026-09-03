@@ -1,0 +1,37 @@
+name: Weekly low-stock alert
+
+on:
+  schedule:
+    # Mondays 04:00 UTC ≈ 09:00 PKT
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+jobs:
+  low-stock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Send low-stock email
+        env:
+          SHOPIFY_SHOP: ${{ secrets.SHOPIFY_SHOP }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          SHOPIFY_API_VERSION: ${{ vars.SHOPIFY_API_VERSION }}
+          LOW_STOCK_THRESHOLD: ${{ vars.LOW_STOCK_THRESHOLD }}
+          LOW_STOCK_EMAIL_TO: ${{ secrets.LOW_STOCK_EMAIL_TO }}
+          LOW_STOCK_EMAIL_FROM: ${{ secrets.LOW_STOCK_EMAIL_FROM }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+        run: npm run stock:low -- --send
