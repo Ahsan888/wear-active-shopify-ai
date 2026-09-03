@@ -142,12 +142,18 @@ npm run books:sync:apply    # actually post + rebuild reports
 One row per month in operating order: collected cash, tax, revenue/refunds, COGS,
 gross profit, Delivery vs Other opex, net profit, orders/units/AOV, then revenue MoM.
 Money is PKR (`#,##0.00`) and margin/rate columns are percentages (`0.0%`).
+Use the filter dropdown in the **Year** column to show one year or multiple years;
+all historical monthly rows remain available.
 
 ### Analytics
 
 Use the sections as a short action list:
 
 - **Pipeline:** demand still waiting for recognition.
+- **Year-over-year summary:** one row per available year for revenue, output tax,
+  gross/net profit, margins, orders, and AOV. Use the **Year** filter dropdown on
+  this table to isolate or compare years. Detailed action sections below continue
+  to use the latest Ledger year.
 - **Sales channel mix:** separates Shopify, Manual (Quick Manual Sale + Manual
   Tracker), and Other Sales revenue and order/transaction counts for YTD and all
   time.

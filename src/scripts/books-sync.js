@@ -173,13 +173,27 @@ async function formatReports(sheets, spreadsheetId, meta, dashValues, analyticsV
       repeatFormat(pnlId, 0, 1, 0, PNL_HEADERS.length, headerFormat),
       dimensionWidth(pnlId, 0, 1, 95),
       dimensionWidth(pnlId, 1, PNL_HEADERS.length, 128),
-      numberFormat(pnlId, 1, pnlRowCount, 1, 8, money),
-      numberFormat(pnlId, 1, pnlRowCount, 8, 9, percent, "PERCENT"),
-      numberFormat(pnlId, 1, pnlRowCount, 9, 13, money),
-      numberFormat(pnlId, 1, pnlRowCount, 13, 14, percent, "PERCENT"),
-      numberFormat(pnlId, 1, pnlRowCount, 14, 16, count),
-      numberFormat(pnlId, 1, pnlRowCount, 16, 18, money),
-      numberFormat(pnlId, 1, pnlRowCount, 18, 19, percent, "PERCENT")
+      numberFormat(pnlId, 1, pnlRowCount, 1, 2, "0"),
+      numberFormat(pnlId, 1, pnlRowCount, 2, 9, money),
+      numberFormat(pnlId, 1, pnlRowCount, 9, 10, percent, "PERCENT"),
+      numberFormat(pnlId, 1, pnlRowCount, 10, 14, money),
+      numberFormat(pnlId, 1, pnlRowCount, 14, 15, percent, "PERCENT"),
+      numberFormat(pnlId, 1, pnlRowCount, 15, 17, count),
+      numberFormat(pnlId, 1, pnlRowCount, 17, 19, money),
+      numberFormat(pnlId, 1, pnlRowCount, 19, 20, percent, "PERCENT"),
+      {
+        setBasicFilter: {
+          filter: {
+            range: {
+              sheetId: pnlId,
+              startRowIndex: 0,
+              endRowIndex: pnlRowCount,
+              startColumnIndex: 0,
+              endColumnIndex: PNL_HEADERS.length,
+            },
+          },
+        },
+      }
     );
   }
 
@@ -193,7 +207,7 @@ async function formatReports(sheets, spreadsheetId, meta, dashValues, analyticsV
       dimensionWidth(analyticsId, 6, 9, 125)
     );
     const sectionPrefixes = [
-      "OPEN PIPELINE", "SALES CHANNEL MIX", "SHOPIFY DELIVERY ROUTE",
+      "OPEN PIPELINE", "YEAR-OVER-YEAR SUMMARY", "SALES CHANNEL MIX", "SHOPIFY DELIVERY ROUTE",
       "TOP SHOPIFY SALES", "TOP MANUAL SALES", "TOP OTHER SALES",
       "EXPENSE MIX", "TAX MIX", "DELIVERY", "PRODUCT FAMILY",
       "BESTSELLERS", "LOWEST-MARGIN", "12-MONTH",
@@ -203,7 +217,7 @@ async function formatReports(sheets, spreadsheetId, meta, dashValues, analyticsV
       if (row >= 0) requests.push(repeatFormat(analyticsId, row, row + 1, 0, 9, sectionFormat));
     }
     const headerStarts = [
-      "Metric", "Channel", "Route", "Item", "Category", "Product family",
+      "Metric", "Year", "Channel", "Route", "Item", "Category", "Product family",
       "By revenue", "SKU", "Month",
     ];
     for (let row = 0; row < analyticsValues.length; row++) {
@@ -212,12 +226,36 @@ async function formatReports(sheets, spreadsheetId, meta, dashValues, analyticsV
       }
     }
     const expenseHeader = findRow(analyticsValues, "Category");
+    const annualHeader = findRow(analyticsValues, "Year");
     const channelHeader = findRow(analyticsValues, "Channel");
     const routeHeader = findRow(analyticsValues, "Route");
     const familyHeader = findRow(analyticsValues, "Product family");
     const bestHeader = findRow(analyticsValues, "By revenue");
     const lowHeader = findRow(analyticsValues, "SKU");
     const trendHeader = findRow(analyticsValues, "Month");
+    if (annualHeader >= 0) {
+      const end = endOfSection(analyticsValues, annualHeader);
+      requests.push(numberFormat(analyticsId, annualHeader + 1, end, 0, 1, "0"));
+      requests.push(numberFormat(analyticsId, annualHeader + 1, end, 1, 4, money));
+      requests.push(numberFormat(analyticsId, annualHeader + 1, end, 4, 5, percent, "PERCENT"));
+      requests.push(numberFormat(analyticsId, annualHeader + 1, end, 5, 6, money));
+      requests.push(numberFormat(analyticsId, annualHeader + 1, end, 6, 7, percent, "PERCENT"));
+      requests.push(numberFormat(analyticsId, annualHeader + 1, end, 7, 8, count));
+      requests.push(numberFormat(analyticsId, annualHeader + 1, end, 8, 9, money));
+      requests.push({
+        setBasicFilter: {
+          filter: {
+            range: {
+              sheetId: analyticsId,
+              startRowIndex: annualHeader,
+              endRowIndex: end,
+              startColumnIndex: 0,
+              endColumnIndex: 9,
+            },
+          },
+        },
+      });
+    }
     if (channelHeader >= 0) {
       const end = endOfSection(analyticsValues, channelHeader);
       requests.push(numberFormat(analyticsId, channelHeader + 1, end, 1, 2, money));

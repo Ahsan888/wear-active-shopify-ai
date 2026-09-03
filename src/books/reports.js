@@ -1,7 +1,7 @@
 const { parseMoney, round2 } = require("./tax");
 
 const PNL_HEADERS = [
-  "Month", "Gross collected", "Output tax", "Revenue ex-tax", "Refunds",
+  "Month", "Year", "Gross collected", "Output tax", "Revenue ex-tax", "Refunds",
   "Net revenue ex-tax", "COGS", "Gross profit", "Gross margin %",
   "Delivery expense", "Other opex", "Total opex", "Net profit",
   "Net margin %", "Orders", "Units", "AOV (ex-tax)",
@@ -242,7 +242,7 @@ function rollupLedger(rows, header, catalogBySku = {}) {
     const revenueDelta = prior ? m.netRevenue - prior.netRevenue : "";
     const revenueDeltaPct = prior?.netRevenue ? revenueDelta / prior.netRevenue : "";
     return [
-      m.month, round2(m.grossCollected), round2(m.outputTax),
+      m.month, Number(m.month.slice(0, 4)), round2(m.grossCollected), round2(m.outputTax),
       round2(m.revenueExTax), round2(m.refunds), round2(m.netRevenue),
       round2(m.cogs), round2(m.grossProfit), m.grossMargin,
       round2(m.deliveryExp), round2(m.otherExp), round2(m.totalOpex),
@@ -393,6 +393,11 @@ function buildAnalyticsValues(rollup, pipeline) {
   const ytdMonths = monthly.filter((m) => m.month.startsWith(`${year}-`));
   const ytd = periodSummary(ytdMonths);
   const allTime = periodSummary(monthly);
+  const annual = [...new Set(monthly.map((m) => m.month.slice(0, 4)))].sort()
+    .map((reportYear) => ({
+      year: Number(reportYear),
+      ...periodSummary(monthly.filter((m) => m.month.startsWith(`${reportYear}-`))),
+    }));
   const ytdMonthKeys = ytdMonths.map((m) => m.month);
   const allMonthKeys = monthly.map((m) => m.month);
   const channelsYtd = aggregateSalesStats(rollup.channelStats, ytdMonthKeys);
@@ -438,6 +443,20 @@ function buildAnalyticsValues(rollup, pipeline) {
     ["Orders", pipeline.orders || 0, "Unrecognized and not posted"],
     ["Gross", round2(pipeline.gross || 0), "Potential customer value"],
     ["Units", pipeline.units || 0, "Awaiting recognition"], [],
+    ["YEAR-OVER-YEAR SUMMARY"],
+    ["Year", "Revenue ex-tax", "Output tax", "Gross profit", "Gross margin %", "Net profit", "Net margin %", "Orders", "AOV"],
+    ...annual.map((summary) => [
+      summary.year,
+      round2(summary.netRevenue),
+      round2(summary.outputTax),
+      round2(summary.grossProfit),
+      summary.grossMargin,
+      round2(summary.netProfit),
+      summary.netMargin,
+      summary.orders,
+      round2(summary.aov),
+    ]),
+    [],
     ["SALES CHANNEL MIX"],
     ["Channel", `YTD ${year} revenue`, `YTD orders / entries`, "All-time revenue", "All-time orders / entries", "YTD mix %"],
     ...["Shopify", "Manual", "Other Sales"].map((channel) => [
