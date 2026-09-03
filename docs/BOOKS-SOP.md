@@ -148,6 +148,14 @@ Money is PKR (`#,##0.00`) and margin/rate columns are percentages (`0.0%`).
 Use the sections as a short action list:
 
 - **Pipeline:** demand still waiting for recognition.
+- **Sales channel mix:** separates Shopify, Manual (Quick Manual Sale + Manual
+  Tracker), and Other Sales revenue and order/transaction counts for YTD and all
+  time.
+- **Shopify delivery route:** new Shopify Ledger posts are marked from the existing
+  `delivery:*` tag as Courier or Booked ourselves (walk-in/self). Historical Shopify
+  entries without a stored route remain clearly labeled Legacy / unclassified.
+- **Top sales by channel:** separate YTD top-10 item tables for Shopify, Manual, and
+  Other Sales. These do not feed or dilute the Variant Master-only bestseller tables.
 - **Expense mix:** where YTD operating spend is concentrated.
 - **Tax mix:** YTD and all-time taxable revenue and output tax from tax-aware posts. “Exempt /
   legacy-untracked” intentionally combines true exempt sales with older history that

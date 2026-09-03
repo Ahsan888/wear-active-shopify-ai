@@ -192,22 +192,53 @@ async function formatReports(sheets, spreadsheetId, meta, dashValues, analyticsV
       dimensionWidth(analyticsId, 5, 6, 315),
       dimensionWidth(analyticsId, 6, 9, 125)
     );
-    const sectionPrefixes = ["OPEN PIPELINE", "EXPENSE MIX", "TAX MIX", "DELIVERY", "PRODUCT FAMILY", "BESTSELLERS", "LOWEST-MARGIN", "12-MONTH"];
+    const sectionPrefixes = [
+      "OPEN PIPELINE", "SALES CHANNEL MIX", "SHOPIFY DELIVERY ROUTE",
+      "TOP SHOPIFY SALES", "TOP MANUAL SALES", "TOP OTHER SALES",
+      "EXPENSE MIX", "TAX MIX", "DELIVERY", "PRODUCT FAMILY",
+      "BESTSELLERS", "LOWEST-MARGIN", "12-MONTH",
+    ];
     for (const prefix of sectionPrefixes) {
       const row = findRow(analyticsValues, prefix);
       if (row >= 0) requests.push(repeatFormat(analyticsId, row, row + 1, 0, 9, sectionFormat));
     }
-    const headerStarts = ["Metric", "Category", "Product family", "By revenue", "SKU", "Month"];
+    const headerStarts = [
+      "Metric", "Channel", "Route", "Item", "Category", "Product family",
+      "By revenue", "SKU", "Month",
+    ];
     for (let row = 0; row < analyticsValues.length; row++) {
       if (headerStarts.includes(String(analyticsValues[row][0] || ""))) {
         requests.push(repeatFormat(analyticsId, row, row + 1, 0, 9, headerFormat));
       }
     }
     const expenseHeader = findRow(analyticsValues, "Category");
+    const channelHeader = findRow(analyticsValues, "Channel");
+    const routeHeader = findRow(analyticsValues, "Route");
     const familyHeader = findRow(analyticsValues, "Product family");
     const bestHeader = findRow(analyticsValues, "By revenue");
     const lowHeader = findRow(analyticsValues, "SKU");
     const trendHeader = findRow(analyticsValues, "Month");
+    if (channelHeader >= 0) {
+      const end = endOfSection(analyticsValues, channelHeader);
+      requests.push(numberFormat(analyticsId, channelHeader + 1, end, 1, 2, money));
+      requests.push(numberFormat(analyticsId, channelHeader + 1, end, 2, 3, count));
+      requests.push(numberFormat(analyticsId, channelHeader + 1, end, 3, 4, money));
+      requests.push(numberFormat(analyticsId, channelHeader + 1, end, 4, 5, count));
+      requests.push(numberFormat(analyticsId, channelHeader + 1, end, 5, 6, percent, "PERCENT"));
+    }
+    if (routeHeader >= 0) {
+      const end = endOfSection(analyticsValues, routeHeader);
+      requests.push(numberFormat(analyticsId, routeHeader + 1, end, 1, 2, money));
+      requests.push(numberFormat(analyticsId, routeHeader + 1, end, 2, 3, count));
+      requests.push(numberFormat(analyticsId, routeHeader + 1, end, 3, 4, money));
+      requests.push(numberFormat(analyticsId, routeHeader + 1, end, 4, 5, count));
+    }
+    for (let row = 0; row < analyticsValues.length; row++) {
+      if (analyticsValues[row][0] !== "Item") continue;
+      const end = endOfSection(analyticsValues, row);
+      requests.push(numberFormat(analyticsId, row + 1, end, 1, 2, money));
+      requests.push(numberFormat(analyticsId, row + 1, end, 2, 3, count));
+    }
     if (expenseHeader >= 0) {
       const end = endOfSection(analyticsValues, expenseHeader);
       requests.push(numberFormat(analyticsId, expenseHeader + 1, end, 1, 2, money));
@@ -408,6 +439,9 @@ async function main() {
       String(r[iTaxY] || "").toUpperCase() === "Y";
     const split =
       meta?.taxSplit || splitInclusiveTax(gross, taxChargeable);
+    const deliveryMode = String(
+      meta?.modeInfo?.mode || r[iMode] || "courier"
+    ).toLowerCase();
     const sku = String(r[iSku] || "").trim();
     const rowDate = String(r[iDate] || "").trim();
     const prod = r[iProd];
@@ -426,7 +460,7 @@ async function main() {
       "Shared",
       "",
       saleRef,
-      taxChargeable ? "taxable" : "exempt",
+      `delivery:${deliveryMode}; ${taxChargeable ? "taxable" : "exempt"}`,
       now,
     ]);
     existing.add(saleRef);
@@ -445,7 +479,7 @@ async function main() {
         "Shared",
         "",
         taxRef,
-        "inclusive 18%",
+        `delivery:${deliveryMode}; inclusive 18%`,
         now,
       ]);
       existing.add(taxRef);
