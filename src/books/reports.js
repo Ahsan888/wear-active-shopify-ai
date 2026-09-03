@@ -1,0 +1,369 @@
+const { parseMoney, round2 } = require("./tax");
+
+const PNL_HEADERS = [
+  "Month", "Gross collected", "Output tax", "Revenue ex-tax", "Refunds",
+  "Net revenue ex-tax", "COGS", "Gross profit", "Gross margin %",
+  "Delivery expense", "Other opex", "Total opex", "Net profit",
+  "Net margin %", "Orders", "Units", "AOV (ex-tax)",
+  "Revenue MoM delta", "Revenue MoM %",
+];
+
+function monthKey(value) {
+  if (typeof value === "number" && value > 20000) {
+    const date = new Date(Date.UTC(1899, 11, 30) + value * 86400000);
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  }
+  const s = String(value || "").trim();
+  const m = s.match(/^(\d{4})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}`;
+  const d = new Date(s);
+  if (isNaN(d)) return "unknown";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function saleUid(ref) {
+  return String(ref || "").startsWith("SALE:") ? String(ref).slice(5) : "";
+}
+
+function orderKeyFromRef(ref) {
+  const uid = saleUid(ref);
+  if (!uid) return "";
+  let match = uid.match(/^SHOPIFY\|([^|]+)\|/i);
+  if (match) return `SHOPIFY|${match[1]}`;
+  match = uid.match(/^(SHOPIFY:#?[^:]+):/i);
+  if (match) return match[1].toUpperCase();
+  return uid;
+}
+
+function cleanProductName(value) {
+  return String(value || "")
+    .replace(/^COGS\s+/i, "")
+    .replace(/\s+\(#?\d+\)\s*$/, "")
+    .trim();
+}
+
+function sum(items, getter) {
+  return items.reduce((total, item) => total + (Number(getter(item)) || 0), 0);
+}
+
+function pct(numerator, denominator) {
+  return denominator ? numerator / denominator : 0;
+}
+
+function makeMonth(month) {
+  return {
+    month, grossCollected: 0, outputTax: 0, revenueExTax: 0, refunds: 0,
+    cogs: 0, deliveryExp: 0, otherExp: 0, units: 0, orders: new Set(),
+    courierOrders: new Set(), taxableRevenue: 0, untrackedRevenue: 0,
+    expenseByCategory: {},
+  };
+}
+
+function finalizeMonth(month) {
+  const netRevenue = month.revenueExTax - month.refunds;
+  const grossProfit = netRevenue - month.cogs;
+  const totalOpex = month.deliveryExp + month.otherExp;
+  const netProfit = grossProfit - totalOpex;
+  return {
+    ...month, netRevenue, grossProfit,
+    grossMargin: pct(grossProfit, netRevenue), totalOpex, netProfit,
+    netMargin: pct(netProfit, netRevenue), orderCount: month.orders.size,
+    courierOrderCount: month.courierOrders.size,
+    aov: pct(netRevenue, month.orders.size),
+  };
+}
+
+function ensureProduct(productStats, sku, description, catalogBySku) {
+  const catalog = catalogBySku[sku] || {};
+  const label = catalog.product || cleanProductName(description) || sku || "Unknown";
+  const key = sku || label;
+  if (!productStats[key]) {
+    productStats[key] = {
+      key, sku, label, family: catalog.product || label,
+      category: catalog.category || "",
+      inVariantMaster: Boolean(sku && catalogBySku[sku]),
+      byMonth: {},
+    };
+  }
+  return productStats[key];
+}
+
+function ensureProductMonth(product, month) {
+  if (!product.byMonth[month]) {
+    product.byMonth[month] = { revenue: 0, cogs: 0, units: 0 };
+  }
+  return product.byMonth[month];
+}
+
+/** Roll up Ledger into monthly P&L and decision-focused analytics structures. */
+function rollupLedger(rows, header, catalogBySku = {}) {
+  const col = (name) => header.findIndex(
+    (h) => String(h).toLowerCase() === name.toLowerCase()
+  );
+  const iDate = col("Date");
+  const iType = col("Entry Type");
+  const iCat = col("Category");
+  const iDesc = col("Description");
+  const iSku = col("SKU");
+  const iQty = col("Qty");
+  const iDebit = col("Debit");
+  const iCredit = col("Credit");
+  const iRef = col("Ref Key");
+
+  const taxUids = new Set();
+  for (const row of rows) {
+    const ref = String(row[iRef] || "");
+    if (ref.startsWith("TAX:")) taxUids.add(ref.slice(4));
+  }
+
+  const rawMonths = {};
+  const productStats = {};
+  const ensureMonth = (key) => {
+    if (!rawMonths[key]) rawMonths[key] = makeMonth(key);
+    return rawMonths[key];
+  };
+
+  for (const row of rows) {
+    const month = monthKey(row[iDate]);
+    if (month === "unknown") continue;
+    const bucket = ensureMonth(month);
+    const type = String(row[iType] || "").trim().toLowerCase();
+    const category = String(row[iCat] || "").trim();
+    const debit = parseMoney(row[iDebit]);
+    const credit = parseMoney(row[iCredit]);
+    const qty = parseMoney(row[iQty]);
+    const sku = String(row[iSku] || "").trim();
+    const description = String(row[iDesc] || "").trim();
+    const ref = String(row[iRef] || "").trim();
+
+    if (type === "sale") {
+      bucket.revenueExTax += credit;
+      bucket.grossCollected += credit;
+      bucket.units += qty;
+      const orderKey = orderKeyFromRef(ref);
+      if (orderKey) bucket.orders.add(orderKey);
+      const uid = saleUid(ref);
+      if (uid && taxUids.has(uid)) {
+        bucket.taxableRevenue += credit;
+        if (orderKey) bucket.courierOrders.add(orderKey);
+      } else {
+        bucket.untrackedRevenue += credit;
+      }
+      const product = ensureProduct(productStats, sku, description, catalogBySku);
+      const productMonth = ensureProductMonth(product, month);
+      productMonth.revenue += credit;
+      productMonth.units += qty;
+    } else if (type === "tax") {
+      bucket.outputTax += credit;
+      bucket.grossCollected += credit;
+    } else if (type === "cogs") {
+      bucket.cogs += debit;
+      const product = ensureProduct(productStats, sku, description, catalogBySku);
+      ensureProductMonth(product, month).cogs += debit;
+    } else if (type === "expense") {
+      if (category.toLowerCase() === "delivery") bucket.deliveryExp += debit;
+      else bucket.otherExp += debit;
+      const name = category || "Other";
+      bucket.expenseByCategory[name] = (bucket.expenseByCategory[name] || 0) + debit;
+    } else if (type === "refund" || /refund/i.test(type)) {
+      bucket.refunds += debit || credit;
+    }
+  }
+
+  const monthly = Object.keys(rawMonths).sort().map((key) => finalizeMonth(rawMonths[key]));
+  const monthlyRows = monthly.map((m, index) => {
+    const prior = monthly[index - 1];
+    const revenueDelta = prior ? m.netRevenue - prior.netRevenue : "";
+    const revenueDeltaPct = prior?.netRevenue ? revenueDelta / prior.netRevenue : "";
+    return [
+      m.month, round2(m.grossCollected), round2(m.outputTax),
+      round2(m.revenueExTax), round2(m.refunds), round2(m.netRevenue),
+      round2(m.cogs), round2(m.grossProfit), m.grossMargin,
+      round2(m.deliveryExp), round2(m.otherExp), round2(m.totalOpex),
+      round2(m.netProfit), m.netMargin, m.orderCount, round2(m.units),
+      round2(m.aov), revenueDelta === "" ? "" : round2(revenueDelta),
+      revenueDeltaPct,
+    ];
+  });
+
+  return {
+    months: rawMonths, monthly, monthlyRows, productStats, taxUids,
+    latestMonth: monthly.at(-1)?.month || "",
+  };
+}
+
+function periodSummary(months) {
+  const netRevenue = sum(months, (m) => m.netRevenue);
+  const grossProfit = sum(months, (m) => m.grossProfit);
+  const netProfit = sum(months, (m) => m.netProfit);
+  const orders = sum(months, (m) => m.orderCount);
+  return {
+    grossCollected: sum(months, (m) => m.grossCollected),
+    outputTax: sum(months, (m) => m.outputTax),
+    revenueExTax: sum(months, (m) => m.revenueExTax),
+    refunds: sum(months, (m) => m.refunds), netRevenue,
+    cogs: sum(months, (m) => m.cogs), grossProfit,
+    grossMargin: pct(grossProfit, netRevenue),
+    deliveryExp: sum(months, (m) => m.deliveryExp),
+    otherExp: sum(months, (m) => m.otherExp),
+    totalOpex: sum(months, (m) => m.totalOpex), netProfit,
+    netMargin: pct(netProfit, netRevenue), orders, orderCount: orders,
+    units: sum(months, (m) => m.units), aov: pct(netRevenue, orders),
+    courierOrders: sum(months, (m) => m.courierOrderCount),
+    taxableRevenue: sum(months, (m) => m.taxableRevenue),
+    untrackedRevenue: sum(months, (m) => m.untrackedRevenue),
+  };
+}
+
+function buildDashboardValues(rollup, pipeline, alerts = []) {
+  const monthly = rollup.monthly || [];
+  const current = monthly.at(-1) || finalizeMonth(makeMonth("No data"));
+  const prior = monthly.at(-2) || null;
+  const year = String(current.month).slice(0, 4);
+  const ytd = periodSummary(monthly.filter((m) => m.month.startsWith(`${year}-`)));
+  const metric = (label, key, type = "money") => {
+    const now = Number(current[key]) || 0;
+    const before = prior ? Number(prior[key]) || 0 : 0;
+    const delta = prior ? now - before : "";
+    const deltaPct = prior && before ? delta / Math.abs(before) : "";
+    return [label, round2(now), prior ? round2(before) : "",
+      delta === "" ? "" : round2(delta), type === "percent" ? "" : deltaPct,
+      round2(Number(ytd[key]) || 0)];
+  };
+
+  return [
+    ["WA BUSINESS DASHBOARD — MONTHLY HEALTH CHECK"],
+    [`Latest ledger month: ${current.month}`, "", "", "", "", `YTD ${year}`],
+    [],
+    ["Metric", "This month", "Last month", "MoM delta", "MoM %", `YTD ${year}`],
+    metric("Gross collected (before refunds)", "grossCollected"),
+    metric("Output tax accrued*", "outputTax"),
+    metric("Revenue ex-tax", "revenueExTax"),
+    metric("Refunds", "refunds"),
+    metric("Net revenue ex-tax", "netRevenue"),
+    metric("COGS", "cogs"),
+    metric("Gross profit", "grossProfit"),
+    metric("Gross margin %", "grossMargin", "percent"),
+    metric("Delivery expense", "deliveryExp"),
+    metric("Other opex", "otherExp"),
+    metric("Net profit", "netProfit"),
+    metric("Net margin %", "netMargin", "percent"),
+    metric("Orders", "orderCount", "count"),
+    metric("Units", "units", "count"),
+    metric("AOV (net revenue / orders)", "aov"),
+    [],
+    ["OPEN PIPELINE — RISK, NOT REVENUE"],
+    ["Metric", "Open now", "Interpretation"],
+    ["Orders", pipeline.orders || 0, "Unrecognized and not posted"],
+    ["Gross", round2(pipeline.gross || 0), "Customer value; not in Ledger"],
+    ["Units", pipeline.units || 0, "Awaiting recognition"],
+    [],
+    ["ATTENTION"],
+    ...(alerts.length ? alerts.map((alert) => [alert]) : [["No open report alerts"]]),
+    ["* Output tax is accrued on tax-aware posts; older gross-booked history may show zero."],
+  ];
+}
+
+function aggregateProducts(productStats, months) {
+  const monthSet = new Set(months);
+  return Object.values(productStats).map((product) => {
+    const selected = Object.entries(product.byMonth)
+      .filter(([month]) => monthSet.has(month)).map(([, values]) => values);
+    const revenue = sum(selected, (v) => v.revenue);
+    const cogs = sum(selected, (v) => v.cogs);
+    const units = sum(selected, (v) => v.units);
+    const grossProfit = revenue - cogs;
+    return { ...product, revenue, cogs, units, grossProfit,
+      grossMargin: pct(grossProfit, revenue) };
+  });
+}
+
+function buildAnalyticsValues(rollup, pipeline) {
+  const monthly = rollup.monthly || [];
+  const latest = monthly.at(-1)?.month || "No ledger data";
+  const year = latest.slice(0, 4);
+  const ytdMonths = monthly.filter((m) => m.month.startsWith(`${year}-`));
+  const ytd = periodSummary(ytdMonths);
+  const products = aggregateProducts(
+    rollup.productStats || {}, ytdMonths.map((m) => m.month)
+  ).filter((p) => p.inVariantMaster && (p.revenue || p.cogs || p.units));
+
+  const expenseMap = {};
+  for (const month of ytdMonths) {
+    for (const [category, value] of Object.entries(month.expenseByCategory)) {
+      expenseMap[category] = (expenseMap[category] || 0) + value;
+    }
+  }
+  const expenses = Object.entries(expenseMap).sort((a, b) => b[1] - a[1]);
+
+  const familyMap = {};
+  for (const product of products) {
+    const key = product.family || product.label;
+    if (!familyMap[key]) familyMap[key] = { revenue: 0, cogs: 0, units: 0 };
+    familyMap[key].revenue += product.revenue;
+    familyMap[key].cogs += product.cogs;
+    familyMap[key].units += product.units;
+  }
+  const families = Object.entries(familyMap).map(([name, value]) => ({
+    name, ...value, grossProfit: value.revenue - value.cogs,
+    grossMargin: pct(value.revenue - value.cogs, value.revenue),
+  })).sort((a, b) => b.revenue - a.revenue).slice(0, 10);
+
+  const byRevenue = [...products].sort((a, b) => b.revenue - a.revenue).slice(0, 10);
+  const byUnits = [...products].sort((a, b) => b.units - a.units).slice(0, 10);
+  const lowMargin = products.filter((p) => p.sku && p.revenue > 0)
+    .sort((a, b) => a.grossMargin - b.grossMargin || a.grossProfit - b.grossProfit)
+    .slice(0, 10);
+
+  const rows = [
+    ["WA ANALYTICS — WHERE TO FOCUS"],
+    [`Reporting period: YTD ${year} through ${latest}`], [],
+    ["OPEN PIPELINE — RISK, NOT REVENUE"],
+    ["Metric", "Now", "Interpretation"],
+    ["Orders", pipeline.orders || 0, "Unrecognized and not posted"],
+    ["Gross", round2(pipeline.gross || 0), "Potential customer value"],
+    ["Units", pipeline.units || 0, "Awaiting recognition"], [],
+    [`EXPENSE MIX — YTD ${year}`], ["Category", "PKR", "% of opex"],
+    ...expenses.map(([category, value]) => [category, round2(value), pct(value, ytd.totalOpex)]),
+    [], [`TAX MIX — YTD ${year}`], ["Metric", "Value", "Notes"],
+    ["Output tax accrued", round2(ytd.outputTax), "Tax-aware posts only"],
+    ["Taxable revenue ex-tax", round2(ytd.taxableRevenue), "Sale has matching Tax row"],
+    ["Exempt / legacy-untracked revenue", round2(ytd.untrackedRevenue), "Includes older gross-booked history"],
+    ["Taxable mix %", pct(ytd.taxableRevenue, ytd.taxableRevenue + ytd.untrackedRevenue), "Use cautiously until all history is tax-aware"],
+    [], [`DELIVERY — YTD ${year}`], ["Metric", "Value", "Notes"],
+    ["Courier orders", ytd.courierOrders, "Distinct tax-linked order references"],
+    ["Delivery expense", round2(ytd.deliveryExp), "Ledger Expense / Delivery"],
+    ["Delivery cost / courier order", round2(pct(ytd.deliveryExp, ytd.courierOrders)), "Directional while older orders lack tax links"],
+    [], [`PRODUCT FAMILY ECONOMICS — TOP 10 BY REVENUE, YTD ${year}`],
+    ["Product family", "Revenue ex-tax", "COGS", "Gross profit", "Gross margin %"],
+    ...families.map((p) => [p.name, round2(p.revenue), round2(p.cogs), round2(p.grossProfit), p.grossMargin]),
+    [], [`BESTSELLERS — YTD ${year}`],
+    ["By revenue", "Revenue", "Units", "GM %", "", "By units", "Units", "Revenue", "GM %"],
+  ];
+
+  for (let i = 0; i < Math.max(byRevenue.length, byUnits.length); i++) {
+    const r = byRevenue[i];
+    const u = byUnits[i];
+    rows.push([
+      r ? `${i + 1}. ${r.label}${r.sku ? ` (${r.sku})` : ""}` : "",
+      r ? round2(r.revenue) : "", r ? round2(r.units) : "", r ? r.grossMargin : "", "",
+      u ? `${i + 1}. ${u.label}${u.sku ? ` (${u.sku})` : ""}` : "",
+      u ? round2(u.units) : "", u ? round2(u.revenue) : "", u ? u.grossMargin : "",
+    ]);
+  }
+
+  rows.push(
+    [], [`LOWEST-MARGIN SKUs — YTD ${year}`],
+    ["SKU", "Product", "Revenue ex-tax", "Gross profit", "Gross margin %"],
+    ...lowMargin.map((p) => [p.sku, p.label, round2(p.revenue), round2(p.grossProfit), p.grossMargin]),
+    [], ["12-MONTH TREND"],
+    ["Month", "Net revenue ex-tax", "Net profit", "Gross margin %", "Net margin %"],
+    ...monthly.slice(-12).map((m) => [m.month, round2(m.netRevenue), round2(m.netProfit), m.grossMargin, m.netMargin])
+  );
+  return rows;
+}
+
+module.exports = {
+  PNL_HEADERS, rollupLedger, buildDashboardValues, buildAnalyticsValues,
+  monthKey, orderKeyFromRef, periodSummary,
+};

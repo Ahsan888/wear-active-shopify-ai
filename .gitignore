@@ -1,0 +1,31 @@
+node_modules/
+.env
+.env.local
+.env.*
+!.env.example
+.DS_Store
+backups/
+*.log
+google-service-account.json
+*-service-account.json
+credentials*.json
+
+# Python/editor environment
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Bulk photo editor working data and generated assets
+wear-active-editor/.temp_images/
+wear-active-editor/input/
+wear-active-editor/photos/
+wear-active-editor/gpt_output/
+wear-active-editor/webp_output/
+wear-active-editor/output/
+wear-active-editor/output-done/
+wear-active-editor/shopify/
+wear-active-editor/failed.txt
+
+# Local IDE planning state
+.cursor/

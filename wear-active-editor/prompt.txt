@@ -1,0 +1,495 @@
+ECOMMERCE PRODUCT PHOTO EDITING — MAXIMUM FIDELITY INSTRUCTIONS
+
+ROLE OF THE IMAGES
+
+Image 1 is the TARGET ecommerce product photograph that must be edited.
+
+Image 2 is the REFERENCE photograph.
+
+The REFERENCE image is provided ONLY as a visual guide for:
+- Background color and tone.
+- Background brightness.
+- Studio lighting.
+- Lighting direction and softness.
+- Exposure.
+- White balance.
+- Contrast.
+- Highlights.
+- Shadows.
+- Overall color grading.
+- General professional studio appearance.
+
+Do NOT copy the model, clothing, pose, body, garment details, product design, framing, or composition from the REFERENCE image.
+
+The TARGET image is the source of truth for the model, product, garment, pose, composition, colors, graphics, construction, texture, and all product details.
+
+
+PRIMARY GOAL
+
+Perform a MINIMAL-CHANGE professional ecommerce retouch of the TARGET photograph.
+
+Make the TARGET photograph look as though it was photographed during the same professional studio session as the REFERENCE image while preserving as much of the original TARGET photograph as possible.
+
+The finished image should look like the ORIGINAL TARGET photograph after careful professional photography retouching.
+
+It must NOT look like a newly generated or reconstructed photograph.
+
+
+IMAGE FIDELITY AND DETAIL PRESERVATION — HIGHEST PRIORITY
+
+MAXIMUM PHOTOGRAPHIC DETAIL PRESERVATION IS REQUIRED.
+
+This is an ecommerce preservation edit, NOT a creative image-generation task.
+
+Preserve as much original photographic information from the TARGET image as possible.
+
+Do NOT unnecessarily repaint, redraw, regenerate, reconstruct, smooth, simplify, sharpen, or reinterpret areas of the TARGET photograph that do not require modification.
+
+Where an area does NOT require editing, preserve it as closely as possible to the original TARGET photograph.
+
+Avoid making global changes to the subject when a localized adjustment would achieve the requested result.
+
+Preserve high-frequency photographic detail, especially:
+
+- Fine fabric weave.
+- Fabric grain.
+- Natural textile texture.
+- Fine stitching.
+- Seam definition.
+- Piping edges.
+- Logo edges.
+- Printed graphics.
+- Printed text and lettering.
+- Embroidery.
+- Garment boundaries.
+- Waistband construction.
+- Pocket edges.
+- Pleats.
+- Darts.
+- Hems.
+- Cuffs.
+- Zippers and fasteners.
+- Fine hair detail.
+- Natural skin texture.
+- Shoe texture.
+- Natural shadow transitions.
+- Fine edge definition.
+
+Do NOT introduce:
+
+- Pixelated-looking details.
+- Blurred fabric.
+- Soft or smeared logos.
+- Loss of stitching definition.
+- Artificially smooth surfaces.
+- Painted-looking fabric.
+- Plastic-looking fabric.
+- Artificial fabric texture.
+- Invented texture.
+- Excessive sharpening.
+- Sharpening halos.
+- Artificial skin smoothing.
+- AI-generated-looking details.
+
+Preserving authentic photographic texture is more important than making the photograph appear artificially perfect.
+
+Make only the changes necessary to accomplish the requested retouching.
+
+
+MATCH THE REFERENCE IMAGE
+
+Use the REFERENCE image to guide the TARGET image's:
+
+- Background color.
+- Background tone.
+- Background brightness.
+- Background cleanliness.
+- Overall studio atmosphere.
+- Lighting direction.
+- Lighting softness and diffusion.
+- Subject illumination.
+- Exposure.
+- Brightness.
+- White balance.
+- Color temperature.
+- Contrast.
+- Highlight intensity.
+- Shadow softness.
+- Shadow intensity.
+- Overall color grading.
+- Professional ecommerce finish.
+
+The TARGET and REFERENCE photographs should feel like they belong to the same professional ecommerce photoshoot when displayed beside each other.
+
+However, matching the reference must NEVER take priority over preserving the actual product or authentic photographic detail.
+
+
+CRITICAL TARGET PRESERVATION
+
+The TARGET image is the source of truth.
+
+Do NOT unnecessarily reconstruct, redesign, reinterpret, replace, or regenerate the TARGET photograph.
+
+Preserve the exact:
+
+- Person/model.
+- Face and identity.
+- Facial features.
+- Facial proportions.
+- Hairstyle.
+- Hair detail.
+- Skin tone.
+- Pose.
+- Body position.
+- Body proportions.
+- Camera angle.
+- Perspective.
+- Composition.
+- Framing.
+- Product.
+- Garment.
+- Garment color.
+- Garment silhouette.
+- Garment fit.
+- Garment length.
+- Garment proportions.
+- Logos.
+- Branding.
+- Printed graphics.
+- Printed text.
+- Lettering.
+- Embroidery.
+- Stitching.
+- Seams.
+- Piping.
+- Waistband.
+- Pockets.
+- Pleats.
+- Darts.
+- Hems.
+- Cuffs.
+- Garment construction.
+- Fabric characteristics.
+- Fabric texture.
+- Shoes.
+- Accessories.
+
+Do NOT invent, remove, reposition, distort, simplify, reinterpret, or redesign genuine product features.
+
+Logos, graphics, text, piping, seams, stitching, pockets, pleats, hems, and other construction details must remain faithful to the TARGET photograph.
+
+If a product detail is clearly visible in the TARGET image, preserve it rather than recreating a different version of it.
+
+
+GARMENT TEXTURE PRESERVATION
+
+The garment must retain realistic textile characteristics.
+
+Preserve:
+
+- Fine fabric texture.
+- Fabric grain.
+- Material thickness.
+- Natural surface variation.
+- Realistic folds.
+- Realistic tension.
+- Natural shadows within folds.
+- Stitching definition.
+- Seam definition.
+- Edge definition.
+
+Do NOT smooth the garment so heavily that fabric texture disappears.
+
+Do NOT create uniform artificial texture to replace genuine photographic fabric detail.
+
+Do NOT make fabric look plastic, rubbery, painted, airbrushed, waxy, or digitally generated.
+
+The garment should continue to look like a real physical textile photographed by a professional camera.
+
+
+TROUSER / PANTS / SHORTS RETOUCHING
+
+When the TARGET product includes trousers, pants, joggers, track pants, leggings, or shorts, professionally clean up distracting wrinkles while preserving the TRUE garment.
+
+Reduce or remove only MAJOR distracting, accidental, excessive, or untidy creases and wrinkles that make the garment appear poorly presented.
+
+The intended result should resemble the SAME garment after being professionally steamed before an ecommerce photoshoot and then receiving subtle professional retouching.
+
+DO NOT attempt to make the trousers completely wrinkle-free.
+
+Natural folds are necessary to communicate the real fabric, fit, construction, movement, and drape.
+
+
+PRESERVE NATURAL TROUSER FOLDS
+
+Preserve folds naturally caused by:
+
+- The model's pose.
+- Leg position.
+- Movement.
+- Gravity.
+- Knee bending.
+- Hip position.
+- Fabric drape.
+- Garment construction.
+- Fabric weight.
+- Natural fabric tension.
+- Contact between the garment and body.
+
+Most importantly, preserve the original:
+
+- Fall of the trousers.
+- Natural drape.
+- Flow.
+- Fabric weight.
+- Fabric feel.
+- Silhouette.
+- Fit.
+- Leg shape.
+- Waist fit.
+- Hip fit.
+- Thigh fit.
+- Knee shape.
+- Calf shape.
+- Ankle opening.
+- Pleats.
+- Piping.
+- Seams.
+- Stitching.
+- Pockets.
+- Waistband.
+- Hems.
+- Cuffs.
+- Fabric texture.
+
+Wrinkle reduction must NOT change the garment's construction, silhouette, fit, proportions, or natural fall.
+
+
+DO NOT OVER-SMOOTH TROUSERS
+
+Do NOT make trousers appear:
+
+- Artificially flat.
+- Perfectly wrinkle-free.
+- Over-ironed.
+- Over-smoothed.
+- Plastic.
+- Stiff.
+- Painted.
+- Airbrushed.
+- Digitally reconstructed.
+- Tighter than the original.
+- Looser than the original.
+- Thinner than the original.
+- Thicker than the original.
+
+Do NOT change the model's leg shape while correcting trouser wrinkles.
+
+Do NOT alter garment edges or silhouette to remove wrinkles.
+
+Do NOT replace genuine fabric texture with generated smooth texture.
+
+Preserve subtle natural wrinkles wherever they help communicate the real fabric and fit.
+
+The final result must remain the SAME trousers in the SAME pose with the SAME fit, fall, drape, construction, texture, and proportions — only with major distracting wrinkles professionally reduced.
+
+
+GENERAL RETOUCHING
+
+Apply subtle, realistic professional ecommerce retouching only.
+
+Correct minor photographic imperfections where appropriate.
+
+Maintain:
+
+- Realistic skin texture.
+- Realistic fabric texture.
+- Fine photographic detail.
+- Natural shadows.
+- Natural highlights.
+- Natural depth.
+- Realistic edges.
+- Natural body proportions.
+
+Do NOT excessively smooth the model's skin.
+
+Do NOT excessively smooth clothing.
+
+Do NOT modify the model's physique.
+
+Do NOT make the model:
+
+- Slimmer.
+- Larger.
+- More muscular.
+- Less muscular.
+- Taller.
+- Shorter.
+- Differently proportioned.
+
+Do NOT unnecessarily alter:
+
+- Face.
+- Hair.
+- Hands.
+- Fingers.
+- Arms.
+- Legs.
+- Feet.
+- Shoes.
+- Accessories.
+
+Do NOT introduce artificial-looking sharpening, smoothing, texture, anatomy, or detail.
+
+The result must remain convincingly photographic.
+
+
+GARMENT COLOR ACCURACY
+
+Preserve the TARGET garment's actual product color.
+
+The REFERENCE image should influence photographic lighting and color grading, NOT the actual color of the product.
+
+Do NOT recolor the TARGET garment to resemble clothing shown in the REFERENCE image.
+
+Minor changes resulting naturally from correcting exposure, white balance, or studio lighting are acceptable.
+
+However, the perceived product color must remain faithful to the TARGET photograph.
+
+Do NOT allow background or lighting adjustments to create a significant false color shift in the garment.
+
+
+LOGO, GRAPHIC AND TEXT ACCURACY
+
+Logos, graphics, prints, embroidery, text, and branding are PRODUCT DETAILS and must receive extremely high preservation priority.
+
+Preserve their:
+
+- Exact location.
+- Scale.
+- Shape.
+- Orientation.
+- Edge definition.
+- Relative proportions.
+- Colors.
+- Lettering.
+- Design.
+
+Do NOT redesign or reinterpret logos.
+
+Do NOT alter letters.
+
+Do NOT invent missing letters or symbols.
+
+Do NOT simplify complex graphics.
+
+Do NOT replace a photographed graphic with a newly interpreted version.
+
+If the TARGET contains a detailed printed design, preserve that design as faithfully as possible.
+
+
+BACKGROUND
+
+Match the REFERENCE image's background as closely as practical in:
+
+- Color.
+- Brightness.
+- Tone.
+- Cleanliness.
+- Lighting.
+- Shadow interaction.
+
+Keep the background minimal and suitable for premium ecommerce photography.
+
+Do NOT add:
+
+- Props.
+- Furniture.
+- Additional objects.
+- Decorations.
+- Text.
+- Graphics.
+- Borders.
+- Watermarks.
+- Artificial design elements.
+
+Do NOT allow background editing to distort the outline of the model or garment.
+
+
+MINIMAL-EDIT PRINCIPLE
+
+Before changing any part of the TARGET photograph, treat preservation as the default.
+
+If something already looks correct, LEAVE IT UNCHANGED.
+
+Do not "improve" areas that were not requested to be changed.
+
+Do not regenerate the entire subject merely to correct lighting, background, or garment wrinkles.
+
+Prefer the smallest visual change necessary to achieve the requested result.
+
+The desired result is:
+
+ORIGINAL TARGET PHOTOGRAPH
++
+PROFESSIONAL STUDIO MATCHING
++
+SUBTLE PRODUCT RETOUCHING
+
+NOT:
+
+A NEW AI-GENERATED VERSION OF THE TARGET PHOTOGRAPH.
+
+
+PRIORITY ORDER
+
+If any instructions conflict, follow this priority order:
+
+1. MAXIMUM preservation of authentic TARGET photographic detail.
+2. Preserve the actual product and all identifying product details.
+3. Preserve logos, graphics, text, stitching, seams, piping, and construction.
+4. Preserve the model, face, pose, composition, and body proportions.
+5. Preserve garment color, fit, silhouette, texture, and natural drape.
+6. Correct major distracting garment wrinkles while maintaining natural folds.
+7. Match the REFERENCE image's lighting, exposure, color treatment, and background.
+8. Apply subtle professional ecommerce cleanup.
+
+PRODUCT ACCURACY AND PHOTOGRAPHIC FIDELITY ALWAYS TAKE PRIORITY OVER STYLIZATION.
+
+If matching the REFERENCE image would require changing an actual product feature or losing genuine photographic detail, preserve the TARGET instead.
+
+
+FINAL QUALITY REQUIREMENTS
+
+Return ONE finished image.
+
+Return the highest-quality and highest-detail image possible.
+
+Prioritize maximum preservation of fine photographic detail within the available output resolution.
+
+The final image must be:
+
+- High quality.
+- High detail.
+- Sharp without artificial oversharpening.
+- Photorealistic.
+- Naturally retouched.
+- Suitable for customer zoom on a premium ecommerce product page.
+- Visually consistent with the supplied REFERENCE image.
+- Faithful to the TARGET photograph.
+- Accurate to the actual garment.
+- Accurate to logos and graphics.
+- Rich in genuine-looking fabric detail.
+- Free from obvious AI-generation artifacts.
+- Free from unnecessary smoothing.
+- Free from obvious pixelation or smeared details.
+
+Fine product details should remain clearly defined when the image is viewed closely.
+
+Fabric texture, stitching, seams, piping, logos, prints, and garment edges should remain as crisp and photographically authentic as possible.
+
+The finished result should look like the TARGET photograph was professionally photographed under the same studio lighting and background conditions as the REFERENCE image and then carefully retouched by a professional ecommerce photo editor.
+
+It should NOT look like the photograph, model, garment, fabric, logos, or graphics were regenerated by AI.
+
+When uncertain whether to modify or preserve an area, PRESERVE THE ORIGINAL TARGET.
