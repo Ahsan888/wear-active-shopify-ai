@@ -23,7 +23,15 @@ const PACKS = [
     audience: "men",
     kind: "outfit",
     saving: 300,
-    components: ["phantom-flex-tee-wht", "phantom-trousers-blk"],
+    components: ["elevate-polo-blk", "strideflex-pants"],
+  },
+  {
+    handle: "mens-everyday-pleated-set",
+    title: "Men's Everyday Pleated Set",
+    audience: "men",
+    kind: "outfit",
+    saving: 300,
+    components: ["elevate-polo-blk", "formflex-pleated-pants-blk"],
   },
   {
     handle: "womens-active-set-black",
@@ -42,6 +50,38 @@ const PACKS = [
     components: ["phantom-flex-tee-wht", "phantomflex-performance-tee-blk"],
   },
   {
+    handle: "phantom-flex-tee-3-pack",
+    title: "Phantom Flex Tee — 3 Pack",
+    audience: "men",
+    kind: "top-pack",
+    saving: 600,
+    components: ["phantom-flex-tee-wht", "phantomflex-performance-tee-blk", "phantom-flex-tee-gry"],
+  },
+  {
+    handle: "coreflex-performance-tee-2-pack",
+    title: "CoreFlex Performance Tee — 2 Pack",
+    audience: "men",
+    kind: "top-pack",
+    saving: 300,
+    components: ["coreflex-performance-tee-copy-blk", "coreflex-performance-tee-gre"],
+  },
+  {
+    handle: "coreflex-performance-tee-3-pack",
+    title: "CoreFlex Performance Tee — 3 Pack",
+    audience: "men",
+    kind: "top-pack",
+    saving: 550,
+    components: ["coreflex-performance-tee-copy-blk", "coreflex-performance-tee-gre", "coreflex-performance-tee-brw"],
+  },
+  {
+    handle: "core-performance-tee-2-pack",
+    title: "Core Performance Tee — 2 Pack",
+    audience: "men",
+    kind: "top-pack",
+    saving: 300,
+    components: ["core-performance-tee-blk", "core-performance-tee-wht"],
+  },
+  {
     handle: "core-performance-tee-3-pack",
     title: "Core Performance Tee — 3 Pack",
     audience: "men",
@@ -58,12 +98,107 @@ const PACKS = [
     components: ["corefit-performance-tee-blk", "corefit-performance-tee-blu"],
   },
   {
+    handle: "coreflex-womens-long-sleeve-2-pack",
+    title: "CoreFlex Women's Long Sleeve — 2 Pack",
+    audience: "women",
+    kind: "top-pack",
+    saving: 200,
+    components: [
+      "coreflex-women-s-performance-long-sleeve-blk",
+      "coreflex-women-s-performance-long-sleeve-blu",
+    ],
+  },
+  {
+    handle: "velocity-quarter-zip-2-pack",
+    title: "Velocity Quarter Zip — 2 Pack",
+    audience: "men",
+    kind: "top-pack",
+    saving: 300,
+    components: ["velocity-quarter-zip-blk", "velocity-quarter-zip-blu"],
+  },
+  {
+    handle: "velocity-quarter-zip-3-pack",
+    title: "Velocity Quarter Zip — 3 Pack",
+    audience: "men",
+    kind: "top-pack",
+    saving: 550,
+    components: ["velocity-quarter-zip-blk", "velocity-quarter-zip-blu", "velocity-quarter-zip-copy"],
+  },
+  {
+    handle: "core-compression-half-sleeve-2-pack",
+    title: "Core Compression Half Sleeve — 2 Pack",
+    audience: "men",
+    kind: "top-pack",
+    saving: 300,
+    components: ["core-compression-shirt-blk-half", "core-compression-shirt-blu-half"],
+  },
+  {
+    handle: "core-compression-full-sleeve-2-pack",
+    title: "Core Compression Full Sleeve — 2 Pack",
+    audience: "men",
+    kind: "top-pack",
+    saving: 200,
+    components: ["core-compression-shirt-blk-full", "core-compression-shirt-blu-full"],
+  },
+  {
+    handle: "oversized-cotton-tee-2-pack",
+    title: "Oversized Cotton Tee — 2 Pack",
+    audience: "men",
+    kind: "top-pack",
+    saving: 350,
+    components: ["oversized-cotton-tee-blk", "oversized-cotton-tee-gry"],
+  },
+  {
+    handle: "microflex-performance-shorts-2-pack",
+    title: "MicroFlex Performance Shorts — 2 Pack",
+    audience: "men",
+    kind: "bottom-pack",
+    saving: 250,
+    components: ["microflex-performance-shorts-blk", "microflex-performance-shorts-blu"],
+  },
+  {
+    handle: "strideflex-training-shorts-3-pack",
+    title: "StrideFlex Training Shorts — 3 Pack",
+    audience: "men",
+    kind: "bottom-pack",
+    saving: 500,
+    components: [
+      "strideflex-training-shorts-blk",
+      "strideflex-training-shorts-gre",
+      "strideflex-training-shorts-blu",
+    ],
+  },
+  {
     handle: "flexflow-trouser-2-pack",
     title: "FlexFlow Micro Stretch Trousers — 2 Pack",
     audience: "men",
     kind: "bottom-pack",
     saving: 200,
     components: ["flexflow-micro-stretch-trousers-blk", "flexflow-micro-stretch-trousers-blu"],
+  },
+  {
+    handle: "motionfit-trousers-2-pack",
+    title: "MotionFit Trousers — 2 Pack",
+    audience: "men",
+    kind: "bottom-pack",
+    saving: 200,
+    components: ["motionfit-trousers-regular-fit-blk", "motionfit-trousers-regular-fit-gre"],
+  },
+  {
+    handle: "coreactive-trousers-2-pack",
+    title: "CoreActive Trousers — 2 Pack",
+    audience: "men",
+    kind: "bottom-pack",
+    saving: 150,
+    components: ["coreactive-trousers-relaxed-fit", "coreactive-trousers-relaxed-fit-blu"],
+  },
+  {
+    handle: "aeroflex-womens-quarter-zip-2-pack",
+    title: "AeroFlex Women's Quarter Zip — 2 Pack",
+    audience: "women",
+    kind: "top-pack",
+    saving: 150,
+    components: ["aeroflex-women-s-performance-quarter-zip-blk", "aeroflex-women-s-performance-quarter-zip-blu"],
   },
 ];
 
@@ -194,13 +329,40 @@ function componentInput(product, label) {
 }
 
 function bundleInput(pack) {
-  return {
+  const input = {
     title: pack.title,
     components: pack.components.map((product, index) => {
       const label = pack.kind === "outfit" ? (index === 0 ? "Top" : "Bottom") : `Item ${index + 1}`;
       return componentInput(product, label);
     }),
   };
+
+  if (pack.kind !== "outfit") {
+    const sizeOptions = pack.components.map((product) =>
+      product.options.find((option) => option.name.toLowerCase() === "size")
+    );
+    if (sizeOptions.every(Boolean)) {
+      const commonSizes = availableValues(pack.components[0], sizeOptions[0].name).filter((size) =>
+        pack.components.every((product, index) => availableValues(product, sizeOptions[index].name).includes(size))
+      );
+      if (commonSizes.length) {
+        input.consolidatedOptions = [
+          {
+            optionName: "Size",
+            optionSelections: commonSizes.map((size) => ({
+              optionValue: size,
+              components: sizeOptions.map((option) => ({
+                componentOptionId: option.id,
+                componentOptionValue: size,
+              })),
+            })),
+          },
+        ];
+      }
+    }
+  }
+
+  return input;
 }
 
 function checkUserErrors(payload, field) {
@@ -444,7 +606,11 @@ async function main() {
   }
 
   const blocked = proposedPacks.filter((pack) => pack.errors.length);
-  if (blocked.length) throw new Error(`Refusing to apply ${blocked.length} unsafe product pack(s)`);
+  const approved = proposedPacks.filter((pack) => pack.errors.length === 0);
+  if (blocked.length) {
+    console.log(`\nBLOCKED BY SAFETY RULES (${blocked.length})`);
+    for (const pack of blocked) console.log(`  ${pack.title}: ${pack.errors.join(", ")}`);
+  }
   if (!capability.shop.features.bundles.eligibleForBundles) {
     throw new Error(`Store is not eligible for bundles: ${capability.shop.features.bundles.ineligibilityReason}`);
   }
@@ -455,9 +621,9 @@ async function main() {
     return;
   }
 
-  for (const pack of proposedPacks) await applyPack(pack);
-  for (const pack of proposedPacks) await verifyPack(pack);
-  console.log(`\nCreated or updated ${proposedPacks.length} native bundle products as drafts.`);
+  for (const pack of approved) await applyPack(pack);
+  for (const pack of approved) await verifyPack(pack);
+  console.log(`\nCreated or updated ${approved.length} native bundle products as drafts; ${blocked.length} blocked.`);
 }
 
 main().catch((error) => {
