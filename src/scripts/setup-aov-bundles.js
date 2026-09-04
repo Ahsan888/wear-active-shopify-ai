@@ -12,7 +12,7 @@ const OFFERS = {
     tag: "bundle-tee",
     collectionTitle: "Bundle Eligible Tees",
     collectionHandle: "bundle-eligible-tees",
-    maximumPerUnitSaving: 100,
+    maximumPerUnitSaving: 134,
     productTitles: new Set([
       "Aura Oversized Performance Tee",
       "Core Compression Shirt Full Sleeve",
@@ -48,8 +48,8 @@ const OFFERS = {
 };
 
 const DISCOUNTS = [
-  { title: "2 Tees Bundle", offer: "tee", quantity: 2, amount: 150 },
-  { title: "3 Tees Bundle", offer: "tee", quantity: 3, amount: 300 },
+  { title: "2 Tees Bundle", offer: "tee", quantity: 2, amount: 200 },
+  { title: "3 Tees Bundle", offer: "tee", quantity: 3, amount: 400 },
   { title: "2 Trousers Bundle", offer: "bottom", quantity: 2, amount: 150 },
 ];
 
