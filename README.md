@@ -104,6 +104,9 @@ Local-only under the editor (gitignored): `input/`, `photos/`, `gpt_output/`,
 | `books:sync:apply` | Apply posting + rebuild Dashboard / P&L / Analytics |
 | `books:hygiene` | Ledger date / category cleanup helpers |
 | `books:archive` | Archive noisy sheet tabs |
+| `bundles:setup` | Audit mix-and-match eligibility and automatic discounts (`--apply` to write) |
+| `complete-look:setup` | Audit product recommendations (`--apply` to write metafields) |
+| `packs:setup` | Audit native outfit/family packs (`--apply` creates or updates drafts) |
 | `stock:low` | Dry-run: list variants with 1 unit left |
 | `stock:low:send` | Email that low-stock report |
 
