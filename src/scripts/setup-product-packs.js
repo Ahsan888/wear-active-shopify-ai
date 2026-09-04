@@ -4,6 +4,7 @@ const { graphql } = require("../shopify/client");
 const { getValues } = require("../sheets/client");
 
 const APPLY = process.argv.includes("--apply");
+const PUBLISH = process.argv.includes("--publish");
 const VERBOSE = process.argv.includes("--verbose");
 const TAX_DIVISOR = 1.18;
 const MIN_BUNDLE_MARGIN = 0.3;
@@ -98,6 +99,14 @@ const PACKS = [
     components: ["corefit-performance-tee-blk", "corefit-performance-tee-blu"],
   },
   {
+    handle: "aura-oversized-performance-tee-2-pack",
+    title: "Aura Oversized Performance Tee — 2 Pack",
+    audience: "women",
+    kind: "top-pack",
+    saving: 300,
+    components: ["aura-oversized-performance-tee-blk", "aura-oversized-performance-tee-blu"],
+  },
+  {
     handle: "coreflex-womens-long-sleeve-2-pack",
     title: "CoreFlex Women's Long Sleeve — 2 Pack",
     audience: "women",
@@ -106,6 +115,18 @@ const PACKS = [
     components: [
       "coreflex-women-s-performance-long-sleeve-blk",
       "coreflex-women-s-performance-long-sleeve-blu",
+    ],
+  },
+  {
+    handle: "coreflex-womens-long-sleeve-3-pack",
+    title: "CoreFlex Women's Long Sleeve — 3 Pack",
+    audience: "women",
+    kind: "top-pack",
+    saving: 300,
+    components: [
+      "coreflex-women-s-performance-long-sleeve-blk",
+      "coreflex-women-s-performance-long-sleeve-blu",
+      "coreflex-women-s-performance-long-sleeve-gry",
     ],
   },
   {
@@ -199,6 +220,14 @@ const PACKS = [
     kind: "top-pack",
     saving: 150,
     components: ["aeroflex-women-s-performance-quarter-zip-blk", "aeroflex-women-s-performance-quarter-zip-blu"],
+  },
+  {
+    handle: "womens-flexflow-trousers-2-pack",
+    title: "Women's FlexFlow Trousers — 2 Pack",
+    audience: "women",
+    kind: "bottom-pack",
+    saving: 150,
+    components: ["flexflow-micro-stretch-trousers-blk-f", "flexflow-micro-stretch-trousers-blu-f"],
   },
 ];
 
@@ -481,7 +510,7 @@ async function updatePackMerchandising(pack, product) {
         descriptionHtml: descriptionHtml(pack),
         vendor: "Wear Active",
         productType: "Bundles",
-        status: "DRAFT",
+        status: PUBLISH ? "ACTIVE" : "DRAFT",
         tags: ["wa-product-pack", `bundle-${pack.kind}`, `gender-${pack.audience}`],
         seo: {
           title: `${pack.title} | Wear Active`,
@@ -536,20 +565,156 @@ async function verifyPack(pack) {
     (variant) => number(variant.price) !== pack.price || number(variant.compareAtPrice) !== pack.compareAtPrice
   );
   const nonBundleVariants = product.variants.nodes.filter((variant) => !variant.requiresComponents);
-  if (product.status !== "DRAFT" || wrongPrice.length || nonBundleVariants.length || product.media.nodes.length === 0) {
+  const expectedStatus = PUBLISH ? "ACTIVE" : "DRAFT";
+  if (product.status !== expectedStatus || wrongPrice.length || nonBundleVariants.length || product.media.nodes.length === 0) {
     throw new Error(
       `Verification failed for ${pack.handle}: status=${product.status}, variants=${product.variants.nodes.length}, ` +
         `wrongPrice=${wrongPrice.length}, nonBundle=${nonBundleVariants.length}, media=${product.media.nodes.length}`
     );
   }
   console.log(
-    `Verified draft: ${pack.handle} | variants=${product.variants.nodes.length} | ` +
+    `Verified ${expectedStatus.toLowerCase()}: ${pack.handle} | variants=${product.variants.nodes.length} | ` +
       `inventory=${product.totalInventory} | media=${product.media.nodes.length}`
   );
+  return product;
+}
+
+async function onlineStorePublication() {
+  const data = await graphql(`query ProductPackPublications { publications(first: 50) { nodes { id name } } }`);
+  const publication = data.publications.nodes.find((candidate) => candidate.name === "Online Store");
+  if (!publication) throw new Error("Online Store publication was not found");
+  return publication;
+}
+
+async function publishResource(resourceId, publicationId) {
+  const data = await graphql(
+    `mutation PublishProductPackResource($id: ID!, $input: [PublicationInput!]!) {
+      publishablePublish(id: $id, input: $input) { userErrors { field message } }
+    }`,
+    { id: resourceId, input: [{ publicationId }] }
+  );
+  checkUserErrors(data, "publishablePublish");
+}
+
+async function findPackCollection() {
+  const data = await graphql(
+    `query ProductPackCollection($query: String!) {
+      collections(first: 10, query: $query) { nodes { id title handle } }
+    }`,
+    { query: "handle:bundles-packs" }
+  );
+  return data.collections.nodes.find((collection) => collection.handle === "bundles-packs") || null;
+}
+
+async function ensurePackCollection() {
+  const existing = await findPackCollection();
+  if (existing) return existing;
+  const data = await graphql(
+    `mutation CreateProductPackCollection($collection: CollectionCreateInput!) {
+      collectionCreate(collection: $collection) {
+        collection { id title handle }
+        userErrors { field message }
+      }
+    }`,
+    {
+      collection: {
+        title: "Bundles & Packs",
+        handle: "bundles-packs",
+        sortOrder: "BEST_SELLING",
+        descriptionHtml:
+          "<p>Build your rotation for less with coordinated outfit sets and value packs. Every bundle tracks the stock of its included Wear Active pieces.</p>",
+        seo: {
+          title: "Activewear Bundles & Value Packs | Wear Active",
+          description: "Shop Wear Active outfit bundles and multi-packs for men and women, with coordinated colours and better value.",
+        },
+        sources: [
+          {
+            source: {
+              title: "Wear Active product pack tag rule",
+              description: "Products tagged wa-product-pack",
+              targetType: "PRODUCTS",
+              inclusion: {
+                matchType: "ALL",
+                conditions: [
+                  { productTag: { relation: "TAGGED_WITH", values: ["wa-product-pack"], matchType: "ANY" } },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    }
+  );
+  return checkUserErrors(data, "collectionCreate").collection;
+}
+
+function menuItemInput(item) {
+  const input = {
+    id: item.id,
+    title: item.title,
+    type: item.type,
+    items: (item.items || []).map(menuItemInput),
+  };
+  if (item.url) input.url = item.url;
+  if (item.resourceId) input.resourceId = item.resourceId;
+  if (item.tags?.length) input.tags = item.tags;
+  return input;
+}
+
+async function addCollectionToMainMenu(collection) {
+  const data = await graphql(`query ProductPackMainMenu {
+    menus(first: 50) {
+      nodes {
+        id title handle
+        items {
+          id title type url resourceId tags
+          items {
+            id title type url resourceId tags
+            items { id title type url resourceId tags }
+          }
+        }
+      }
+    }
+  }`);
+  const menu = data.menus.nodes.find((candidate) => candidate.handle === "main-menu");
+  if (!menu) throw new Error("Main menu (main-menu) was not found");
+  const items = menu.items.map(menuItemInput).filter((item) => item.title.toLowerCase() !== "bundles");
+  const bundleItem = {
+    title: "Bundles",
+    type: "COLLECTION",
+    resourceId: collection.id,
+    url: "/collections/bundles-packs",
+    items: [],
+  };
+  const saleIndex = items.findIndex((item) => item.title.toLowerCase() === "sale");
+  if (saleIndex >= 0) items.splice(saleIndex, 0, bundleItem);
+  else items.push(bundleItem);
+
+  const update = await graphql(
+    `mutation UpdateProductPackMenu($id: ID!, $title: String!, $items: [MenuItemUpdateInput!]!) {
+      menuUpdate(id: $id, title: $title, items: $items) {
+        menu { id handle items { id title url } }
+        userErrors { field message }
+      }
+    }`,
+    { id: menu.id, title: menu.title, items }
+  );
+  checkUserErrors(update, "menuUpdate");
+  console.log("Added Bundles to the main menu.");
+}
+
+async function publishPackCatalog(products) {
+  const publication = await onlineStorePublication();
+  const collection = await ensurePackCollection();
+  for (const product of products) await publishResource(product.id, publication.id);
+  await publishResource(collection.id, publication.id);
+  await addCollectionToMainMenu(collection);
+  console.log(`Published ${products.length} bundle products and the Bundles & Packs collection.`);
 }
 
 async function main() {
-  console.log(`Mode: ${APPLY ? "APPLY — DRAFT PRODUCTS" : "DRY-RUN"}`);
+  if (PUBLISH && !APPLY) throw new Error("Use --publish together with --apply");
+  console.log(`Mode: ${PUBLISH ? "APPLY + PUBLISH" : APPLY ? "APPLY — DRAFT PRODUCTS" : "DRY-RUN"}`);
   const [products, costs, units, capability] = await Promise.all([
     fetchProducts(),
     loadSheetMap("'Variant Master'!A1:U1000", "SKU", "CostPerItem"),
@@ -566,6 +731,7 @@ async function main() {
   console.log(`Ineligibility reason: ${capability.shop.features.bundles.ineligibilityReason || "none"}`);
   console.log(`Store sells bundles: ${capability.shop.features.bundles.sellsBundles}`);
   console.log(`write_products scope: ${scopes.includes("write_products")}`);
+  console.log(`write_online_store_navigation scope: ${scopes.includes("write_online_store_navigation")}`);
   console.log(`Bundle capability fields: ${capability.bundleFeatureType.fields.map((field) => field.name).join(", ")}`);
 
   const rows = products
@@ -615,6 +781,9 @@ async function main() {
     throw new Error(`Store is not eligible for bundles: ${capability.shop.features.bundles.ineligibilityReason}`);
   }
   if (!scopes.includes("write_products")) throw new Error("Shopify app is missing write_products");
+  if (PUBLISH && !scopes.includes("write_online_store_navigation")) {
+    throw new Error("Shopify app is missing write_online_store_navigation");
+  }
 
   if (!APPLY) {
     console.log("\nDry-run only. Re-run with --apply to create or update these products as drafts.");
@@ -622,8 +791,13 @@ async function main() {
   }
 
   for (const pack of approved) await applyPack(pack);
-  for (const pack of approved) await verifyPack(pack);
-  console.log(`\nCreated or updated ${approved.length} native bundle products as drafts; ${blocked.length} blocked.`);
+  const verifiedProducts = [];
+  for (const pack of approved) verifiedProducts.push(await verifyPack(pack));
+  if (PUBLISH) await publishPackCatalog(verifiedProducts);
+  console.log(
+    `\nCreated or updated ${approved.length} native bundle products as ${PUBLISH ? "active" : "drafts"}; ` +
+      `${blocked.length} blocked.`
+  );
 }
 
 main().catch((error) => {
