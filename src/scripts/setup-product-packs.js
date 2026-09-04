@@ -16,7 +16,7 @@ const PACKS = [
     title: "Men's Performance Set — Black",
     audience: "men",
     kind: "outfit",
-    saving: 350,
+    saving: 550,
     components: ["core-performance-tee-blk", "microflex-performance-shorts-blk"],
   },
   {
@@ -40,7 +40,7 @@ const PACKS = [
     title: "Women's Active Set — Black",
     audience: "women",
     kind: "outfit",
-    saving: 300,
+    saving: 450,
     components: ["aura-oversized-performance-tee-blk", "eclipse-relaxed-trousers-blk"],
   },
   {
@@ -48,7 +48,7 @@ const PACKS = [
     title: "Phantom Flex Tee — 2 Pack",
     audience: "men",
     kind: "top-pack",
-    saving: 350,
+    saving: 400,
     components: ["phantom-flex-tee-wht", "phantomflex-performance-tee-blk"],
   },
   {
@@ -56,7 +56,7 @@ const PACKS = [
     title: "Phantom Flex Tee — 3 Pack",
     audience: "men",
     kind: "top-pack",
-    saving: 600,
+    saving: 650,
     components: ["phantom-flex-tee-wht", "phantomflex-performance-tee-blk", "phantom-flex-tee-gry"],
   },
   {
@@ -64,7 +64,7 @@ const PACKS = [
     title: "CoreFlex Performance Tee — 2 Pack",
     audience: "men",
     kind: "top-pack",
-    saving: 300,
+    saving: 400,
     components: ["coreflex-performance-tee-copy-blk", "coreflex-performance-tee-gre"],
   },
   {
@@ -72,7 +72,7 @@ const PACKS = [
     title: "CoreFlex Performance Tee — 3 Pack",
     audience: "men",
     kind: "top-pack",
-    saving: 550,
+    saving: 650,
     components: ["coreflex-performance-tee-copy-blk", "coreflex-performance-tee-gre", "coreflex-performance-tee-brw"],
   },
   {
@@ -80,7 +80,7 @@ const PACKS = [
     title: "Core Performance Tee — 2 Pack",
     audience: "men",
     kind: "top-pack",
-    saving: 300,
+    saving: 500,
     components: ["core-performance-tee-blk", "core-performance-tee-wht"],
   },
   {
@@ -88,7 +88,7 @@ const PACKS = [
     title: "Core Performance Tee — 3 Pack",
     audience: "men",
     kind: "top-pack",
-    saving: 600,
+    saving: 900,
     components: ["core-performance-tee-blk", "core-performance-tee-wht", "core-performance-tee-blu"],
   },
   {
@@ -96,7 +96,7 @@ const PACKS = [
     title: "CoreFit Women's Performance Tee — 2 Pack",
     audience: "women",
     kind: "top-pack",
-    saving: 300,
+    saving: 450,
     components: ["corefit-performance-tee-blk", "corefit-performance-tee-blu"],
   },
   {
@@ -104,7 +104,7 @@ const PACKS = [
     title: "Aura Oversized Performance Tee — 2 Pack",
     audience: "women",
     kind: "top-pack",
-    saving: 300,
+    saving: 450,
     components: ["aura-oversized-performance-tee-blk", "aura-oversized-performance-tee-blu"],
   },
   {
@@ -112,7 +112,7 @@ const PACKS = [
     title: "CoreFlex Women's Long Sleeve — 2 Pack",
     audience: "women",
     kind: "top-pack",
-    saving: 200,
+    saving: 300,
     components: [
       "coreflex-women-s-performance-long-sleeve-blk",
       "coreflex-women-s-performance-long-sleeve-blu",
@@ -123,7 +123,7 @@ const PACKS = [
     title: "CoreFlex Women's Long Sleeve — 3 Pack",
     audience: "women",
     kind: "top-pack",
-    saving: 300,
+    saving: 450,
     components: [
       "coreflex-women-s-performance-long-sleeve-blk",
       "coreflex-women-s-performance-long-sleeve-blu",
@@ -135,7 +135,7 @@ const PACKS = [
     title: "Velocity Quarter Zip — 2 Pack",
     audience: "men",
     kind: "top-pack",
-    saving: 300,
+    saving: 400,
     components: ["velocity-quarter-zip-blk", "velocity-quarter-zip-blu"],
   },
   {
@@ -143,7 +143,7 @@ const PACKS = [
     title: "Velocity Quarter Zip — 3 Pack",
     audience: "men",
     kind: "top-pack",
-    saving: 550,
+    saving: 650,
     components: ["velocity-quarter-zip-blk", "velocity-quarter-zip-blu", "velocity-quarter-zip-copy"],
   },
   {
@@ -151,7 +151,7 @@ const PACKS = [
     title: "Core Compression Half Sleeve — 2 Pack",
     audience: "men",
     kind: "top-pack",
-    saving: 300,
+    saving: 500,
     components: ["core-compression-shirt-blk-half", "core-compression-shirt-blu-half"],
   },
   {
@@ -159,7 +159,7 @@ const PACKS = [
     title: "Core Compression Full Sleeve — 2 Pack",
     audience: "men",
     kind: "top-pack",
-    saving: 200,
+    saving: 300,
     components: ["core-compression-shirt-blk-full", "core-compression-shirt-blu-full"],
   },
   {
@@ -167,7 +167,7 @@ const PACKS = [
     title: "Oversized Cotton Tee — 2 Pack",
     audience: "men",
     kind: "top-pack",
-    saving: 350,
+    saving: 550,
     components: ["oversized-cotton-tee-blk", "oversized-cotton-tee-gry"],
   },
   {
@@ -175,7 +175,7 @@ const PACKS = [
     title: "MicroFlex Performance Shorts — 2 Pack",
     audience: "men",
     kind: "bottom-pack",
-    saving: 250,
+    saving: 400,
     components: ["microflex-performance-shorts-blk", "microflex-performance-shorts-blu"],
   },
   {
@@ -183,7 +183,7 @@ const PACKS = [
     title: "StrideFlex Training Shorts — 3 Pack",
     audience: "men",
     kind: "bottom-pack",
-    saving: 500,
+    saving: 750,
     components: [
       "strideflex-training-shorts-blk",
       "strideflex-training-shorts-gre",
@@ -203,7 +203,7 @@ const PACKS = [
     title: "MotionFit Trousers — 2 Pack",
     audience: "men",
     kind: "bottom-pack",
-    saving: 200,
+    saving: 0,
     components: ["motionfit-trousers-regular-fit-blk", "motionfit-trousers-regular-fit-gre"],
   },
   {
@@ -211,7 +211,7 @@ const PACKS = [
     title: "CoreActive Trousers — 2 Pack",
     audience: "men",
     kind: "bottom-pack",
-    saving: 150,
+    saving: 200,
     components: ["coreactive-trousers-relaxed-fit", "coreactive-trousers-relaxed-fit-blu"],
   },
   {
@@ -219,7 +219,7 @@ const PACKS = [
     title: "AeroFlex Women's Quarter Zip — 2 Pack",
     audience: "women",
     kind: "top-pack",
-    saving: 150,
+    saving: 300,
     components: ["aeroflex-women-s-performance-quarter-zip-blk", "aeroflex-women-s-performance-quarter-zip-blu"],
   },
   {
