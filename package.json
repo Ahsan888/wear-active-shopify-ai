@@ -50,6 +50,7 @@
     "books:sync": "node src/scripts/books-sync.js",
     "books:sync:apply": "node src/scripts/books-sync.js --apply",
     "bundles:setup": "node src/scripts/setup-aov-bundles.js",
+    "complete-look:setup": "node src/scripts/setup-complete-look.js",
     "stock:low": "node src/scripts/low-stock-alert.js",
     "stock:low:send": "node src/scripts/low-stock-alert.js --send"
   },
