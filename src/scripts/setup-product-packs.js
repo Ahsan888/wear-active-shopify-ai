@@ -677,12 +677,16 @@ async function addCollectionToMainMenu(collection) {
       }
     }
   }`);
-  const menu = data.menus.nodes.find((candidate) => candidate.handle === "main-menu");
-  if (!menu) throw new Error("Main menu (main-menu) was not found");
+  const menu =
+    data.menus.nodes.find((candidate) => candidate.handle === "main-menu-v2") ||
+    data.menus.nodes.find((candidate) => candidate.handle === "main-menu");
+  if (!menu) throw new Error("Storefront header menu (main-menu-v2 or main-menu) was not found");
   const replacedTitles = new Set(["bundles", "new arrivals", "new arrival"]);
-  const items = menu.items
-    .map(menuItemInput)
-    .filter((item) => !replacedTitles.has(item.title.trim().toLowerCase()));
+  const originalItems = menu.items.map(menuItemInput);
+  const newArrivalsIndex = originalItems.findIndex((item) =>
+    ["new arrivals", "new arrival"].includes(item.title.trim().toLowerCase())
+  );
+  const items = originalItems.filter((item) => !replacedTitles.has(item.title.trim().toLowerCase()));
   const bundleItem = {
     title: "Bundles",
     type: "COLLECTION",
@@ -690,8 +694,9 @@ async function addCollectionToMainMenu(collection) {
     url: "/collections/bundles-packs",
     items: [],
   };
-  const saleIndex = items.findIndex((item) => item.title.toLowerCase() === "sale");
-  if (saleIndex >= 0) items.splice(saleIndex, 0, bundleItem);
+  const bestSellersIndex = items.findIndex((item) => item.title.trim().toLowerCase() === "best sellers");
+  const insertionIndex = newArrivalsIndex >= 0 ? Math.min(newArrivalsIndex, items.length) : bestSellersIndex;
+  if (insertionIndex >= 0) items.splice(insertionIndex, 0, bundleItem);
   else items.push(bundleItem);
 
   const update = await graphql(
