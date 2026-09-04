@@ -13,43 +13,20 @@ const OFFERS = {
     collectionTitle: "Bundle Eligible Tees",
     collectionHandle: "bundle-eligible-tees",
     maximumPerUnitSaving: 134,
-    productTitles: new Set([
-      "Aura Oversized Performance Tee",
-      "Core Compression Shirt Full Sleeve",
-      "Core Compression Shirt Half Sleeve",
-      "Core Performance Tee",
-      "CoreFit Performance Tee",
-      "CoreFlex Performance Tee",
-      "Elevate Essential Tee",
-      "Inferno Performance Tee",
-      "Oversized Cotton Tee",
-      "Phantom Flex Tee",
-      "Phantom Graphic Tee",
-      "Pulse Performance Tee",
-      "StormStrike Performance Tee",
-      "Velocity Quarter Zip",
-      "Ventra Performance Top",
-    ]),
+    productTypes: new Set(["Shirts", "Hoodies", "Jackets"]),
   },
   bottom: {
     tag: "bundle-bottom",
     collectionTitle: "Bundle Eligible Bottoms",
     collectionHandle: "bundle-eligible-bottoms",
     maximumPerUnitSaving: 75,
-    productTitles: new Set([
-      "Eclipse Relaxed Trousers",
-      "FlexFlow Micro Stretch Trousers",
-      "MicroFlex Performance Shorts",
-      "MotionFlex Performance Joggers",
-      "Phantom Trousers",
-      "StrideFlex Training Shorts",
-    ]),
+    productTypes: new Set(["Trousers", "Shorts"]),
   },
 };
 
 const DISCOUNTS = [
-  { title: "2 Tees Bundle", offer: "tee", quantity: 2, amount: 200 },
-  { title: "3 Tees Bundle", offer: "tee", quantity: 3, amount: 400 },
+  { title: "2 Tops Bundle", previousTitles: ["2 Tees Bundle"], offer: "tee", quantity: 2, amount: 200 },
+  { title: "3 Tops Bundle", previousTitles: ["3 Tees Bundle"], offer: "tee", quantity: 3, amount: 400 },
   { title: "2 Trousers Bundle", offer: "bottom", quantity: 2, amount: 150 },
 ];
 
@@ -97,9 +74,9 @@ async function fetchProducts() {
       products(first: 100, after: $cursor, sortKey: TITLE) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          id title handle tags onlineStoreUrl
+          id title handle productType tags onlineStoreUrl
           variants(first: 100) {
-            nodes { id sku price inventoryQuantity }
+            nodes { id sku price compareAtPrice inventoryQuantity }
           }
         }
       }
@@ -117,6 +94,11 @@ async function fetchProducts() {
 }
 
 function evaluateProduct(product, offer, costs) {
+  const hasAudience = product.tags.some((tag) => tag === "gender-men" || tag === "gender-women");
+  const matchesOffer = Boolean(product.onlineStoreUrl && offer.productTypes.has(product.productType) && hasAudience);
+  const isOnSale = product.variants.nodes.some(
+    (variant) => parseNumber(variant.compareAtPrice) > parseNumber(variant.price)
+  );
   const matched = product.variants.nodes
     .map((variant) => ({
       price: parseNumber(variant.price),
@@ -125,8 +107,14 @@ function evaluateProduct(product, offer, costs) {
     }))
     .filter((variant) => variant.price > 0 && variant.cost > 0);
 
-  if (!product.onlineStoreUrl || !offer.productTitles.has(product.title) || matched.length === 0) {
-    return { eligible: false, margin: null, reason: "not approved or missing price/cost" };
+  if (!matchesOffer) {
+    return { candidate: false, eligible: false, margin: null, reason: "wrong category or audience" };
+  }
+  if (isOnSale) {
+    return { candidate: true, eligible: false, margin: null, reason: "on sale" };
+  }
+  if (matched.length === 0) {
+    return { candidate: true, eligible: false, margin: null, reason: "missing Variant Master cost" };
   }
 
   const inStock = matched.some((variant) => variant.inventory > 0);
@@ -136,6 +124,7 @@ function evaluateProduct(product, offer, costs) {
   });
   const margin = Math.min(...margins);
   return {
+    candidate: true,
     eligible: inStock && margin >= MIN_POST_DISCOUNT_MARGIN,
     margin,
     reason: !inStock ? "out of stock" : margin < MIN_POST_DISCOUNT_MARGIN ? "margin below floor" : "approved",
@@ -287,6 +276,7 @@ async function main() {
   ]);
 
   const eligibility = { tee: [], bottom: [] };
+  const excluded = { tee: [], bottom: [] };
   const tagChanges = [];
   for (const product of products) {
     const desired = [];
@@ -295,6 +285,8 @@ async function main() {
       if (result.eligible) {
         desired.push(offer.tag);
         eligibility[key].push({ product, ...result });
+      } else if (result.candidate) {
+        excluded[key].push({ product, ...result });
       }
     }
 
@@ -309,6 +301,11 @@ async function main() {
   for (const [key, rows] of Object.entries(eligibility)) {
     console.log(`\n${key.toUpperCase()} ELIGIBLE (${rows.length})`);
     for (const row of rows) console.log(`  ${row.product.title} / ${row.product.handle} — ${percent(row.margin)}`);
+    console.log(`${key.toUpperCase()} EXCLUDED (${excluded[key].length})`);
+    for (const row of excluded[key]) {
+      const margin = row.margin == null ? "" : ` (${percent(row.margin)})`;
+      console.log(`  ${row.product.title} / ${row.product.handle} — ${row.reason}${margin}`);
+    }
   }
 
   console.log(`\nTag changes: ${tagChanges.length}`);
@@ -339,7 +336,8 @@ async function main() {
   }
 
   for (const definition of DISCOUNTS) {
-    const node = discountNodes.find((candidate) => candidate.discount.title === definition.title);
+    const acceptedTitles = [definition.title, ...(definition.previousTitles || [])];
+    const node = discountNodes.find((candidate) => acceptedTitles.includes(candidate.discount.title));
     if (!node) throw new Error(`Automatic discount not found: ${definition.title}`);
     await updateDiscount(node, definition, collections[definition.offer].id);
     console.log(`Updated ${definition.title}`);
