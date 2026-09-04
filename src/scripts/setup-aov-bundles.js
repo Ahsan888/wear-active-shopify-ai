@@ -12,23 +12,30 @@ const OFFERS = {
     tag: "bundle-tee",
     collectionTitle: "Bundle Eligible Tees",
     collectionHandle: "bundle-eligible-tees",
-    maximumPerUnitSaving: 134,
+    maximumPerUnitSaving: 184,
     productTypes: new Set(["Shirts", "Hoodies", "Jackets"]),
   },
   bottom: {
     tag: "bundle-bottom",
     collectionTitle: "Bundle Eligible Bottoms",
     collectionHandle: "bundle-eligible-bottoms",
-    maximumPerUnitSaving: 75,
+    maximumPerUnitSaving: 100,
     productTypes: new Set(["Trousers", "Shorts"]),
   },
 };
 
 const DISCOUNTS = [
-  { title: "2 Tops Bundle", previousTitles: ["2 Tees Bundle"], offer: "tee", quantity: 2, amount: 200 },
-  { title: "3 Tops Bundle", previousTitles: ["3 Tees Bundle"], offer: "tee", quantity: 3, amount: 400 },
-  { title: "2 Trousers Bundle", offer: "bottom", quantity: 2, amount: 150 },
+  { title: "2 Tops Bundle", previousTitles: ["2 Tees Bundle"], offer: "tee", quantity: 2, amount: 300 },
+  { title: "3 Tops Bundle", previousTitles: ["3 Tees Bundle"], offer: "tee", quantity: 3, amount: 550 },
+  { title: "2 Trousers Bundle", offer: "bottom", quantity: 2, amount: 200 },
 ];
+
+/** Handles that skip the margin floor (still blocked if on sale or out of stock). */
+const FORCE_INCLUDE_HANDLES = new Set([
+  "motionfit-trousers-regular-fit-blk",
+  "motionfit-trousers-regular-fit-gre",
+  "motionfit-trousers-regular-fit-gry",
+]);
 
 function money(value) {
   return `Rs. ${Number(value || 0).toLocaleString("en-PK", { maximumFractionDigits: 0 })}`;
@@ -123,11 +130,19 @@ function evaluateProduct(product, offer, costs) {
     return revenueExTax > 0 ? (revenueExTax - variant.cost) / revenueExTax : -1;
   });
   const margin = Math.min(...margins);
+  const forceInclude = FORCE_INCLUDE_HANDLES.has(product.handle);
+  const marginOk = forceInclude || margin >= MIN_POST_DISCOUNT_MARGIN;
   return {
     candidate: true,
-    eligible: inStock && margin >= MIN_POST_DISCOUNT_MARGIN,
+    eligible: inStock && marginOk,
     margin,
-    reason: !inStock ? "out of stock" : margin < MIN_POST_DISCOUNT_MARGIN ? "margin below floor" : "approved",
+    reason: !inStock
+      ? "out of stock"
+      : !marginOk
+        ? "margin below floor"
+        : forceInclude
+          ? "approved (force-include)"
+          : "approved",
   };
 }
 
