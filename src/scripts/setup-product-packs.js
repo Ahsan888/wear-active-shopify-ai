@@ -5,6 +5,7 @@ const { getValues } = require("../sheets/client");
 
 const APPLY = process.argv.includes("--apply");
 const PUBLISH = process.argv.includes("--publish");
+const NAVIGATION_ONLY = process.argv.includes("--navigation-only");
 const VERBOSE = process.argv.includes("--verbose");
 const TAX_DIVISOR = 1.18;
 const MIN_BUNDLE_MARGIN = 0.3;
@@ -678,7 +679,10 @@ async function addCollectionToMainMenu(collection) {
   }`);
   const menu = data.menus.nodes.find((candidate) => candidate.handle === "main-menu");
   if (!menu) throw new Error("Main menu (main-menu) was not found");
-  const items = menu.items.map(menuItemInput).filter((item) => item.title.toLowerCase() !== "bundles");
+  const replacedTitles = new Set(["bundles", "new arrivals", "new arrival"]);
+  const items = menu.items
+    .map(menuItemInput)
+    .filter((item) => !replacedTitles.has(item.title.trim().toLowerCase()));
   const bundleItem = {
     title: "Bundles",
     type: "COLLECTION",
@@ -700,7 +704,7 @@ async function addCollectionToMainMenu(collection) {
     { id: menu.id, title: menu.title, items }
   );
   checkUserErrors(update, "menuUpdate");
-  console.log("Added Bundles to the main menu.");
+  console.log("Added Bundles to the main menu in place of New Arrivals.");
 }
 
 async function publishPackCatalog(products) {
@@ -714,6 +718,13 @@ async function publishPackCatalog(products) {
 
 async function main() {
   if (PUBLISH && !APPLY) throw new Error("Use --publish together with --apply");
+  if (NAVIGATION_ONLY) {
+    if (!APPLY) throw new Error("Use --navigation-only together with --apply");
+    const collection = await findPackCollection();
+    if (!collection) throw new Error("Bundles & Packs collection was not found");
+    await addCollectionToMainMenu(collection);
+    return;
+  }
   console.log(`Mode: ${PUBLISH ? "APPLY + PUBLISH" : APPLY ? "APPLY — DRAFT PRODUCTS" : "DRY-RUN"}`);
   const [products, costs, units, capability] = await Promise.all([
     fetchProducts(),
