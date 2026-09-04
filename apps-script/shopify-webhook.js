@@ -12,6 +12,7 @@
  *   delivery:courier  → tax 18% (default if untagged)
  *   delivery:self     → tax exempt
  *   delivery:walkin   → tax exempt
+ *   wa:gift / wa:pr   → gift/PR — tax exempt, no revenue (COGS only)
  *   wa:recognized     → force books recognition
  *   wa:hold           → never post until cleared
  *
@@ -212,6 +213,12 @@ function handleShopifyRefund_(refund) {
 
 function deliveryModeFromTags_(tags) {
   const list = (tags || []).map((t) => String(t).toLowerCase().trim());
+  if (
+    list.indexOf("wa:gift") >= 0 ||
+    list.indexOf("wa:pr") >= 0 ||
+    list.indexOf("delivery:gift") >= 0
+  )
+    return { mode: "gift", taxChargeable: false };
   if (list.indexOf("delivery:walkin") >= 0 || list.indexOf("delivery:walk-in") >= 0)
     return { mode: "walkin", taxChargeable: false };
   if (list.indexOf("delivery:self") >= 0)
@@ -230,8 +237,10 @@ function isRecognized_(fulfillment, payment, tags, mode) {
   if (["cancelled", "canceled", "voided", "refunded"].indexOf(pay) >= 0)
     return false;
   const paid = pay === "paid" || pay === "partially_paid";
+  const fulfilled = ful === "fulfilled" || ful === "delivered";
+  if (mode === "gift" && (paid || fulfilled)) return true;
   if ((mode === "walkin" || mode === "self") && paid) return true;
-  if ((ful === "fulfilled" || ful === "delivered") && paid) return true;
+  if (fulfilled && paid) return true;
   return false;
 }
 

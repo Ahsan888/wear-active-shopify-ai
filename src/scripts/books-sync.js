@@ -8,7 +8,7 @@ const {
   parseUid,
   enrichLiveRows,
 } = require("../books/live-enrich");
-const { parseMoney, splitInclusiveTax } = require("../books/tax");
+const { parseMoney, splitInclusiveTax, isTaxChargeableFlag, dateKey } = require("../books/tax");
 const { isRecognized } = require("../books/recognition");
 const {
   PNL_HEADERS,
@@ -23,6 +23,230 @@ const CHANNEL_REPORTS = [
   { title: "Manual Analytics", channel: "Manual" },
   { title: "Other Sales Analytics", channel: "Other Sales" },
 ];
+
+/**
+ * Post / tax-backfill Other Sales using Tax Chargeable.
+ * Legacy Apps Script posted full Revenue as Sale and ignored the tax column.
+ */
+async function collectOtherSalesLedgerUpdates(
+  sheets,
+  spreadsheetId,
+  existingRefs,
+  ledgerRows,
+  ledgerHeader
+) {
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: "'Other Sales'!A1:Z",
+    valueRenderOption: "UNFORMATTED_VALUE",
+  });
+  const rows = res.data.values || [];
+  if (rows.length < 2) {
+    return { append: [], saleCreditFixes: [], processedWrites: [], summary: { newRows: 0, taxBackfill: 0, saleFixes: 0 } };
+  }
+
+  const head = rows[0].map((h) => String(h || "").trim());
+  const idx = (name) =>
+    head.findIndex((h) => h.toLowerCase() === name.toLowerCase());
+  const iDate = idx("Date");
+  const iItem = idx("Item");
+  const iCat = idx("Category");
+  const iQty = idx("Qty");
+  const iRev = idx("Revenue");
+  const iCost = idx("Cost");
+  const iOwn = idx("Owner");
+  const iNote = idx("Notes");
+  const iProc = idx("Processed");
+  const iTax = idx("Tax Chargeable");
+
+  if (iDate < 0 || iProc < 0) {
+    throw new Error("Other Sales missing Date or Processed column");
+  }
+  if (iTax < 0) {
+    console.log("Other Sales: no Tax Chargeable column — skipping tax-aware posting");
+    return { append: [], saleCreditFixes: [], processedWrites: [], summary: { newRows: 0, taxBackfill: 0, saleFixes: 0 } };
+  }
+
+  const iRef = ledgerHeader.indexOf("Ref Key");
+  const iCredit = ledgerHeader.indexOf("Credit");
+  const iNotes = ledgerHeader.indexOf("Notes");
+  const saleRowByRef = new Map();
+  for (let i = 1; i < ledgerRows.length; i++) {
+    const ref = String(ledgerRows[i][iRef] || "").trim();
+    if (ref) saleRowByRef.set(ref, i); // 0-based in values incl header → sheet row = i+1
+  }
+
+  const append = [];
+  const saleCreditFixes = [];
+  const processedWrites = [];
+  const now = new Date().toISOString();
+  let taxBackfill = 0;
+  let saleFixes = 0;
+  let newRows = 0;
+  const refs = new Set(existingRefs);
+
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || !row.some((v) => String(v ?? "").trim() !== "")) continue;
+
+    const dk = dateKey(row[iDate]);
+    if (!dk) continue;
+
+    const revenue = parseMoney(row[iRev]);
+    const cost = parseMoney(row[iCost]);
+    const qty = parseMoney(row[iQty]) || 1;
+    const desc = String(row[iItem] || "").trim() || "Other Sale";
+    const category = String(row[iCat] || "Other").trim() || "Other";
+    const owner = String(row[iOwn] || "Shared").trim() || "Shared";
+    const notes = String(row[iNote] || "").trim();
+    const taxChargeable = isTaxChargeableFlag(row[iTax]);
+    const isProcessed =
+      row[iProc] === true ||
+      String(row[iProc] ?? "").toUpperCase() === "TRUE" ||
+      String(row[iProc] ?? "").toUpperCase() === "Y" ||
+      String(row[iProc] ?? "") === "1";
+
+    const baseUid = `OTHER:${dk}:${r}`;
+    const saleKey = `${baseUid}:SALE`;
+    const cogsKey = `${baseUid}:COGS`;
+    const taxKey = `TAX:${baseUid}`;
+    const split = splitInclusiveTax(revenue, taxChargeable);
+
+    // --- Already posted: backfill tax split if needed ---
+    if (isProcessed || refs.has(saleKey)) {
+      if (taxChargeable && revenue > 0 && !refs.has(taxKey)) {
+        append.push([
+          dk,
+          "Tax",
+          "Other Sales",
+          "Output Tax",
+          `Output tax ${desc}`,
+          "",
+          qty,
+          0,
+          split.taxAmount,
+          owner,
+          "",
+          taxKey,
+          `other-sales; inclusive 18%; backfill`,
+          now,
+        ]);
+        refs.add(taxKey);
+        taxBackfill++;
+        newRows++;
+
+        const ledgerIdx = saleRowByRef.get(saleKey);
+        if (ledgerIdx != null && iCredit >= 0) {
+          const currentCredit = parseMoney(ledgerRows[ledgerIdx][iCredit]);
+          // Only shrink if Sale still holds the full inclusive revenue
+          if (Math.abs(currentCredit - revenue) < 0.02 && split.taxAmount > 0) {
+            saleCreditFixes.push({
+              range: `'Ledger'!${colLetter(iCredit + 1)}${ledgerIdx + 1}`,
+              values: [[split.revenueExTax]],
+            });
+            if (iNotes >= 0) {
+              const prevNotes = String(ledgerRows[ledgerIdx][iNotes] || "").trim();
+              const tag = "taxable; inclusive 18% split";
+              saleCreditFixes.push({
+                range: `'Ledger'!${colLetter(iNotes + 1)}${ledgerIdx + 1}`,
+                values: [[prevNotes ? `${prevNotes}; ${tag}` : tag]],
+              });
+            }
+            ledgerRows[ledgerIdx][iCredit] = split.revenueExTax;
+            saleFixes++;
+          }
+        }
+      }
+      continue;
+    }
+
+    // --- New unprocessed row ---
+    if (!revenue && !cost) continue;
+
+    let wrote = false;
+    if (revenue > 0 && !refs.has(saleKey)) {
+      append.push([
+        dk,
+        "Sale",
+        "Other Sales",
+        category,
+        desc,
+        "",
+        qty,
+        0,
+        taxChargeable ? split.revenueExTax : revenue,
+        owner,
+        "",
+        saleKey,
+        taxChargeable
+          ? `${notes}${notes ? "; " : ""}taxable; inclusive 18%`
+          : `${notes}${notes ? "; " : ""}exempt`,
+        now,
+      ]);
+      refs.add(saleKey);
+      wrote = true;
+      newRows++;
+    }
+
+    if (taxChargeable && split.taxAmount > 0 && !refs.has(taxKey)) {
+      append.push([
+        dk,
+        "Tax",
+        "Other Sales",
+        "Output Tax",
+        `Output tax ${desc}`,
+        "",
+        qty,
+        0,
+        split.taxAmount,
+        owner,
+        "",
+        taxKey,
+        "other-sales; inclusive 18%",
+        now,
+      ]);
+      refs.add(taxKey);
+      wrote = true;
+      newRows++;
+    }
+
+    if (cost > 0 && !refs.has(cogsKey)) {
+      append.push([
+        dk,
+        "COGS",
+        "Other Sales",
+        "COGS",
+        `COGS ${desc}`,
+        "",
+        qty,
+        cost,
+        0,
+        owner,
+        "",
+        cogsKey,
+        notes,
+        now,
+      ]);
+      refs.add(cogsKey);
+      wrote = true;
+      newRows++;
+    }
+
+    if (wrote || refs.has(saleKey) || refs.has(cogsKey)) {
+      processedWrites.push({
+        range: `'Other Sales'!${colLetter(iProc + 1)}${r + 1}`,
+        values: [["TRUE"]],
+      });
+    }
+  }
+
+  return {
+    append,
+    saleCreditFixes,
+    processedWrites,
+    summary: { newRows, taxBackfill, saleFixes },
+  };
+}
 
 async function batchWrite(sheets, spreadsheetId, data) {
   for (let i = 0; i < data.length; i += 80) {
@@ -539,7 +763,10 @@ async function main() {
   const postedWrites = [];
   for (let i = 0; i < dataRows.length; i++) {
     const uid = String(dataRows[i][iUid] || "").trim();
-    const posted = uid && existing.has(`SALE:${uid}`) ? "Y" : "N";
+    const posted =
+      uid && (existing.has(`SALE:${uid}`) || existing.has(`GIFT:${uid}`))
+        ? "Y"
+        : "N";
     if (iPosted >= 0) {
       dataRows[i][iPosted] = posted;
       postedWrites.push({
@@ -588,15 +815,16 @@ async function main() {
       continue;
     }
 
-    if (!gross) {
+    if (!gross && deliveryModeFromRow(meta, r, iMode) !== "gift") {
       skippedNoNet++;
       continue;
     }
 
     const cogsRef = `COGS:${uid}`;
     const taxRef = `TAX:${uid}`;
+    const giftRef = `GIFT:${uid}`;
 
-    if (existing.has(saleRef)) {
+    if (existing.has(saleRef) || existing.has(giftRef)) {
       skippedPosted++;
       continue;
     }
@@ -604,52 +832,75 @@ async function main() {
     const taxChargeable =
       meta?.modeInfo?.taxChargeable ??
       String(r[iTaxY] || "").toUpperCase() === "Y";
-    const split =
-      meta?.taxSplit || splitInclusiveTax(gross, taxChargeable);
     const deliveryMode = String(
       meta?.modeInfo?.mode || r[iMode] || "courier"
     ).toLowerCase();
+    const isGift = deliveryMode === "gift";
+    const split =
+      meta?.taxSplit ||
+      splitInclusiveTax(isGift ? 0 : gross, isGift ? false : taxChargeable);
     const sku = String(r[iSku] || "").trim();
     const rowDate = String(r[iDate] || "").trim();
     const prod = r[iProd];
 
-    // Sale = revenue ex-tax
-    out.push([
-      rowDate,
-      "Sale",
-      "Shopify",
-      "Product",
-      prod,
-      sku,
-      qty,
-      0,
-      split.revenueExTax,
-      "Shared",
-      "",
-      saleRef,
-      `delivery:${deliveryMode}; ${taxChargeable ? "taxable" : "exempt"}`,
-      now,
-    ]);
-    existing.add(saleRef);
-
-    if (taxChargeable && split.taxAmount > 0) {
+    if (isGift) {
+      // Gift / PR: no revenue, no tax — inventory cost still books as COGS
       out.push([
         rowDate,
-        "Tax",
+        "Gift",
         "Shopify",
-        "Output Tax",
-        `Output tax ${prod || sku}`,
+        "Gift/PR",
+        prod,
         sku,
         qty,
         0,
-        split.taxAmount,
+        0,
         "Shared",
         "",
-        taxRef,
-        `delivery:${deliveryMode}; inclusive 18%`,
+        giftRef,
+        `delivery:gift; exempt; no customer value`,
         now,
       ]);
-      existing.add(taxRef);
+      existing.add(giftRef);
+    } else {
+      // Sale = revenue ex-tax
+      out.push([
+        rowDate,
+        "Sale",
+        "Shopify",
+        "Product",
+        prod,
+        sku,
+        qty,
+        0,
+        split.revenueExTax,
+        "Shared",
+        "",
+        saleRef,
+        `delivery:${deliveryMode}; ${taxChargeable ? "taxable" : "exempt"}`,
+        now,
+      ]);
+      existing.add(saleRef);
+
+      if (taxChargeable && split.taxAmount > 0) {
+        out.push([
+          rowDate,
+          "Tax",
+          "Shopify",
+          "Output Tax",
+          `Output tax ${prod || sku}`,
+          sku,
+          qty,
+          0,
+          split.taxAmount,
+          "Shared",
+          "",
+          taxRef,
+          `delivery:${deliveryMode}; inclusive 18%`,
+          now,
+        ]);
+        existing.add(taxRef);
+      }
     }
 
     const unitCost = sku ? costMap[sku] || 0 : 0;
@@ -668,7 +919,7 @@ async function main() {
         "Shared",
         "",
         cogsRef,
-        "",
+        isGift ? "gift/PR" : "",
         now,
       ]);
       existing.add(cogsRef);
@@ -686,10 +937,40 @@ async function main() {
   );
   console.log("Pipeline:", pipelineSummary);
 
-  // Rebuild reports from full ledger + new outs
-  const previewLedger = apply
-    ? [...ledger.slice(1), ...out]
-    : [...ledger.slice(1), ...out];
+  const otherSales = await collectOtherSalesLedgerUpdates(
+    sheets,
+    spreadsheetId,
+    existing,
+    ledger,
+    lHead
+  );
+  out.push(...otherSales.append);
+  for (const row of otherSales.append) {
+    const ref = String(row[11] || "").trim();
+    if (ref) existing.add(ref);
+  }
+  console.log(
+    `Other Sales: +${otherSales.summary.newRows} ledger rows (tax backfill ${otherSales.summary.taxBackfill}, sale credit fixes ${otherSales.summary.saleFixes})`
+  );
+
+  // Rebuild reports from full ledger + new outs (apply in-memory sale credit fixes first)
+  const previewLedger = ledger.slice(1).map((row) => [...row]);
+  const iCreditCol = lHead.indexOf("Credit");
+  const iNotesCol = lHead.indexOf("Notes");
+  for (const fix of otherSales.saleCreditFixes) {
+    const m = String(fix.range).match(/!([A-Z]+)(\d+)$/);
+    if (!m) continue;
+    const col = m[1];
+    const previewIdx = Number(m[2]) - 2;
+    if (previewIdx < 0 || previewIdx >= previewLedger.length) continue;
+    if (iCreditCol >= 0 && col === colLetter(iCreditCol + 1)) {
+      previewLedger[previewIdx][iCreditCol] = fix.values[0][0];
+    }
+    if (iNotesCol >= 0 && col === colLetter(iNotesCol + 1)) {
+      previewLedger[previewIdx][iNotesCol] = fix.values[0][0];
+    }
+  }
+  previewLedger.push(...out);
 
   const rollup = rollupLedger(previewLedger, lHead, catalogBySku);
   const alerts = [];
@@ -730,9 +1011,14 @@ async function main() {
   }
 
   // Write enrich + posted flags
-  await batchWrite(sheets, spreadsheetId, [...enrichWrites, ...postedWrites]);
+  await batchWrite(sheets, spreadsheetId, [
+    ...enrichWrites,
+    ...postedWrites,
+    ...otherSales.saleCreditFixes,
+    ...otherSales.processedWrites,
+  ]);
   console.log(
-    `Updated LIVE enrich cells: ${enrichWrites.length + postedWrites.length}`
+    `Updated LIVE enrich cells: ${enrichWrites.length + postedWrites.length}; Other Sales fixes/processed: ${otherSales.saleCreditFixes.length + otherSales.processedWrites.length}`
   );
 
   if (out.length) {
@@ -749,7 +1035,11 @@ async function main() {
     const morePosted = [];
     for (let i = 0; i < dataRows.length; i++) {
       const uid = String(dataRows[i][iUid] || "").trim();
-      if (uid && existing.has(`SALE:${uid}`) && iPosted >= 0) {
+      if (
+        uid &&
+        (existing.has(`SALE:${uid}`) || existing.has(`GIFT:${uid}`)) &&
+        iPosted >= 0
+      ) {
         morePosted.push({
           range: `'Shopify Orders (LIVE)'!${colLetter(iPosted + 1)}${i + 2}`,
           values: [["Y"]],
@@ -842,6 +1132,12 @@ function colLetter(n) {
     x = Math.floor((x - 1) / 26);
   }
   return s;
+}
+
+function deliveryModeFromRow(meta, row, iMode) {
+  const fromMeta = String(meta?.modeInfo?.mode || "").toLowerCase();
+  if (fromMeta) return fromMeta;
+  return String(row[iMode] || "courier").toLowerCase();
 }
 
 main().catch((e) => {

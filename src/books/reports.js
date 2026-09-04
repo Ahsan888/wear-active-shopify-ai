@@ -22,7 +22,13 @@ function monthKey(value) {
 }
 
 function saleUid(ref) {
-  return String(ref || "").startsWith("SALE:") ? String(ref).slice(5) : "";
+  const s = String(ref || "").trim();
+  if (s.startsWith("SALE:")) return s.slice(5);
+  if (s.startsWith("GIFT:")) return s.slice(5);
+  // Legacy Other Sales refs: OTHER:yyyy-mm-dd:row:SALE → OTHER:yyyy-mm-dd:row
+  const other = s.match(/^(OTHER:\d{4}-\d{2}-\d{2}:\d+):SALE$/i);
+  if (other) return other[1];
+  return "";
 }
 
 function orderKeyFromRef(ref) {
@@ -52,7 +58,9 @@ function saleChannel(source, ref) {
 }
 
 function shopifyDeliveryRoute(notes) {
-  const match = String(notes || "").match(/delivery:(courier|self|walkin)/i);
+  const s = String(notes || "");
+  if (/delivery:gift|wa:gift|wa:pr/i.test(s)) return "Gift / PR";
+  const match = s.match(/delivery:(courier|self|walkin)/i);
   if (!match) return "Legacy / unclassified";
   return match[1].toLowerCase() === "courier" ? "Courier" : "Booked ourselves";
 }
@@ -249,6 +257,23 @@ function rollupLedger(rows, header, catalogBySku = {}) {
         itemLabel,
         debit
       );
+    } else if (type === "gift") {
+      // Gift / PR: stock out with no revenue (COGS still booked as COGS rows)
+      bucket.units += qty;
+      const product = ensureProduct(productStats, sku, description, catalogBySku);
+      ensureProductMonth(product, month).units += qty;
+      const orderKey = orderKeyFromRef(ref);
+      if (orderKey) bucket.orders.add(orderKey);
+      if (saleChannel(source, ref) === "Shopify") {
+        addSaleToBucket(
+          ensureSalesBucket(deliveryRouteStats, "Gift / PR", month),
+          orderKey,
+          sku || cleanProductName(description) || "Gift",
+          cleanProductName(description) || sku || "Gift",
+          0,
+          qty
+        );
+      }
     } else if (type === "expense") {
       if (category.toLowerCase() === "delivery") bucket.deliveryExp += debit;
       else bucket.otherExp += debit;
@@ -472,7 +497,7 @@ function buildChannelAnalyticsValues(rollup, channel) {
       const monthKeys = monthly.filter((m) => m.month.startsWith(`${year}-`)).map((m) => m.month);
       const routes = aggregateSalesStats(rollup.deliveryRouteStats, monthKeys);
       const totalRevenue = sum(Object.values(routes), (route) => route.revenue);
-      for (const route of ["Courier", "Booked ourselves", "Legacy / unclassified"]) {
+      for (const route of ["Courier", "Booked ourselves", "Gift / PR", "Legacy / unclassified"]) {
         const value = routes[route] || {};
         rows.push([
           Number(year), route, round2(value.revenue || 0), value.orders || 0,
@@ -587,13 +612,17 @@ function buildAnalyticsValues(rollup, pipeline) {
     ["Count basis: Shopify = distinct order references; Manual / Other Sales = Ledger sale entries."],
     [], ["SHOPIFY DELIVERY ROUTE — TRACKED FROM NEW POSTS"],
     ["Route", `YTD ${year} revenue`, `YTD ${year} orders`, "All-time revenue", "All-time orders", "Notes"],
-    ...["Courier", "Booked ourselves", "Legacy / unclassified"].map((route) => [
+    ...["Courier", "Booked ourselves", "Gift / PR", "Legacy / unclassified"].map((route) => [
       route,
       round2(deliveryYtd[route]?.revenue || 0),
       deliveryYtd[route]?.orders || 0,
       round2(deliveryAll[route]?.revenue || 0),
       deliveryAll[route]?.orders || 0,
-      route === "Legacy / unclassified" ? "Historical Shopify sales without delivery tags in Ledger" : "Recorded from delivery:* on new posts",
+      route === "Legacy / unclassified"
+        ? "Historical Shopify sales without delivery tags in Ledger"
+        : route === "Gift / PR"
+          ? "wa:gift / wa:pr — no revenue, tax exempt"
+          : "Recorded from delivery:* on new posts",
     ]),
     [],
     ...buildChannelTopSalesRows("SHOPIFY", channelsYtd.Shopify?.items, year),

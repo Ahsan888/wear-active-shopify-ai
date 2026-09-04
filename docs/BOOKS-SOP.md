@@ -67,19 +67,31 @@ Tax math (prices are inclusive):
 
 Same as walk-in, but tag **`delivery:self`**.
 
-### D) Stuck / special cases
+### D) Gift / PR (no tax, no revenue)
+
+1. Shopify Admin → **Orders → Create order**.
+2. Add product(s). Prefer **$0** line price (or 100% discount).
+3. Tag: **`wa:gift`** or **`wa:pr`** (alias: `delivery:gift`).
+4. Mark paid/fulfilled when the piece leaves stock.
+5. Sync → Ledger **Gift** (Rs 0) + **COGS** only. No Tax row. Catalog price on
+   the order is ignored for revenue.
+
+### E) Stuck / special cases
 
 | Tag | Meaning |
 |---|---|
 | `wa:hold` | Never book until you remove the tag |
 | `wa:recognized` | Force book even if fulfillment status is lagging (cash already in hand) |
 
-### E) Other Sales sheet
+### F) Other Sales sheet
 
 Only if it never touches Shopify. Fill the row and tick **Tax Chargeable** when
-tax applies. The checkbox stores `Y` when checked and `N` when unchecked.
+tax applies (prices are tax-inclusive; sync splits 18/118 into Sale + Tax). The
+checkbox stores `Y` when checked and `N` when unchecked. `npm run books:sync:apply`
+posts new Other Sales rows and backfills tax for older taxable rows that were
+booked as full gross before this column was wired in.
 
-### F) Quick Manual Sale
+### G) Quick Manual Sale
 
 Archived/hidden. Don’t use for normal sales anymore.
 

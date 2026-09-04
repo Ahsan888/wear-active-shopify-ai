@@ -42,12 +42,17 @@ function isRecognized({
   const modeInfo = deliveryMode
     ? {
         mode: deliveryMode,
-        taxChargeable: !["walkin", "self"].includes(deliveryMode),
+        taxChargeable: !["walkin", "self", "gift"].includes(deliveryMode),
       }
     : deliveryModeFromTags(tags);
 
   const paid = ["paid", "partially_paid", "partially paid"].includes(pay);
   const fulfilled = ["fulfilled", "delivered"].includes(fulfill);
+
+  // Gift / PR: no customer value — book once paid or fulfilled (stock left)
+  if (modeInfo.mode === "gift" && (paid || fulfilled)) {
+    return { recognized: true, reason: "gift_issued" };
+  }
 
   // Walk-in / self: paid is enough (cash/JazzCash in hand)
   if (

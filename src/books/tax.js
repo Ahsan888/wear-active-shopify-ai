@@ -37,6 +37,13 @@ function deliveryModeFromTags(tags) {
         .filter(Boolean);
 
   if (list.includes("wa:hold")) return { mode: "hold", taxChargeable: false, hold: true };
+  if (
+    list.includes("wa:gift") ||
+    list.includes("wa:pr") ||
+    list.includes("delivery:gift")
+  ) {
+    return { mode: "gift", taxChargeable: false, hold: false };
+  }
   if (list.includes("delivery:walkin") || list.includes("delivery:walk-in")) {
     return { mode: "walkin", taxChargeable: false, hold: false };
   }
@@ -59,6 +66,33 @@ function hasTag(tags, needle) {
   return list.includes(String(needle).toLowerCase());
 }
 
+/** Other Sales / LIVE checkbox or Y/N/TRUE cell. */
+function isTaxChargeableFlag(value) {
+  if (value === true || value === 1) return true;
+  const s = String(value ?? "")
+    .trim()
+    .toUpperCase();
+  return s === "Y" || s === "YES" || s === "TRUE" || s === "CHECKED";
+}
+
+/** Normalize sheet date → yyyy-mm-dd (matches Apps Script OTHER: keys). */
+function dateKey(value) {
+  if (value == null || value === "") return "";
+  if (typeof value === "number" && value > 20000) {
+    const date = new Date(Date.UTC(1899, 11, 30) + value * 86400000);
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+  }
+  if (value instanceof Date && !isNaN(value)) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  }
+  const s = String(value).trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  const d = new Date(s);
+  if (isNaN(d)) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 module.exports = {
   TAX_RATE,
   parseMoney,
@@ -66,4 +100,6 @@ module.exports = {
   splitInclusiveTax,
   deliveryModeFromTags,
   hasTag,
+  isTaxChargeableFlag,
+  dateKey,
 };
