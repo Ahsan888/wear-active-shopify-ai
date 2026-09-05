@@ -22,6 +22,15 @@ reports/decisions/**
 !reports/decisions/.gitkeep
 reports/dashboard/**
 !reports/dashboard/.gitkeep
+reports/snapshots/**
+!reports/snapshots/.gitkeep
+reports/briefs/**
+!reports/briefs/.gitkeep
+reports/alerts/**
+!reports/alerts/.gitkeep
+reports/delivery/**
+!reports/delivery/.gitkeep
+reports/daily.log
 
 # OS / editor noise
 .DS_Store

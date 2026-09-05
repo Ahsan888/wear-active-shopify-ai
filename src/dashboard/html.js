@@ -148,7 +148,116 @@ function buildCtx(report) {
       (report.recommendations || []).filter((r) => r.priority !== "info")
     ),
     contribTone: statusClass(report.shopify_context?.contribution_status),
+    operational: report.operational || null,
   };
+}
+
+function renderTrendRows(trends, cur) {
+  const metrics = trends?.metrics || {};
+  const keys = [
+    ["meta_spend", "Meta spend", true],
+    ["meta_cpa", "Meta CPA", true],
+    ["meta_roas", "Meta ROAS", false],
+    ["shopify_net_revenue", "Shopify net revenue", true],
+    ["shopify_contribution_after_meta", "Shopify contribution", true],
+    ["meta_adjusted_profit", "Meta-adjusted profit", true],
+    ["recognized_orders", "Recognized orders", false],
+  ];
+  const rows = keys
+    .map(([key, label, isMoney]) => {
+      const m = metrics[key];
+      if (!m) return "";
+      const fmt = (v) => {
+        if (v == null) return "—";
+        if (key === "meta_roas") return roas(v);
+        if (key === "recognized_orders") return num(v, 0);
+        if (isMoney) return money(v, cur);
+        return String(v);
+      };
+      const change = !m.comparable
+        ? `<span class="muted">${escapeHtml(m.reason === "not_comparable" ? "not comparable" : "no prior snapshot")}</span>`
+        : `${m.delta == null ? "—" : isMoney ? money(m.delta, cur) : num(m.delta, 2)}${
+            m.delta_pct == null ? "" : ` (${pct(m.delta_pct)})`
+          }`;
+      return `<tr>
+        <td>${escapeHtml(label)}</td>
+        <td>${fmt(m.current)}</td>
+        <td>${fmt(m.previous)}</td>
+        <td>${change}</td>
+      </tr>`;
+    })
+    .join("");
+  return rows;
+}
+
+function renderDailyAlertsSection(operational) {
+  if (!operational) {
+    return `<section>
+    <h2>Daily Alerts</h2>
+    <p class="empty">Historical trend data will appear after multiple daily snapshots. Run <code>npm run reports:daily</code>.</p>
+  </section>`;
+  }
+  const alerts = operational.alerts || [];
+  const active = alerts.filter((a) => a.status === "active");
+  const resolved = alerts.filter((a) => a.lifecycle === "resolved");
+  const bySev = (sev) =>
+    active.filter((a) => a.severity === sev);
+  const list = (items) =>
+    items.length
+      ? `<ul class="alert-list">${items
+          .map(
+            (a) =>
+              `<li><span class="pill tone-${
+                a.severity === "critical" || a.severity === "high"
+                  ? "bad"
+                  : a.severity === "medium"
+                    ? "warn"
+                    : "neutral"
+              }">${escapeHtml(String(a.lifecycle || "new").toUpperCase())}</span> <strong>${escapeHtml(a.title)}</strong> — ${escapeHtml(a.message || "")}</li>`
+          )
+          .join("")}</ul>`
+      : `<p class="empty">None</p>`;
+
+  const attn = operational.attention_summary;
+  return `<section>
+    <div class="divider-label">Operational · Daily Alerts</div>
+    <h2>Daily Alerts</h2>
+    ${attn?.headline ? `<p class="summary-line">${escapeHtml(attn.headline)}</p>` : ""}
+    <div class="grid-2">
+      <div><h3>Critical</h3>${list(bySev("critical"))}</div>
+      <div><h3>High</h3>${list(bySev("high"))}</div>
+      <div><h3>Medium</h3>${list(bySev("medium"))}</div>
+      <div><h3>Low / Info</h3>${list([...bySev("low"), ...bySev("info")])}</div>
+    </div>
+    ${
+      resolved.length
+        ? `<details style="margin-top:12px"><summary>Resolved (${resolved.length})</summary>${list(resolved)}</details>`
+        : ""
+    }
+  </section>`;
+}
+
+function renderTrendsSection(operational, cur) {
+  const trends = operational?.trends;
+  if (!trends) {
+    return `<section>
+    <h2>Trends</h2>
+    <p class="empty">Historical trend data will appear after multiple daily snapshots.</p>
+  </section>`;
+  }
+  return `<section>
+    <div class="divider-label">Operational · Comparable History</div>
+    <h2>Trends</h2>
+    <p class="note">${escapeHtml(trends.note || "vs previous comparable snapshot")}${
+      trends.previous_reporting_date
+        ? ` · prior ${escapeHtml(trends.previous_reporting_date)}`
+        : ""
+    }</p>
+    <table class="trend-table">
+      <thead><tr><th>Metric</th><th>Current</th><th>Previous</th><th>Change</th></tr></thead>
+      <tbody>${renderTrendRows(trends, cur) || `<tr><td colspan="4" class="empty">No trend metrics.</td></tr>`}</tbody>
+    </table>
+  </section>`;
 }
 
 function renderOverview(ctx) {
@@ -182,6 +291,11 @@ function renderOverview(ctx) {
       : "";
 
   return `<div id="view-overview" class="view active">
+  ${
+    ctx.operational?.snapshot?.period?.current_day_incomplete
+      ? `<p class="note tone-warn">Today's Meta and order activity may still be incomplete.</p>`
+      : ""
+  }
   <section>
     <div class="divider-label">Whole Business · Recognized Actuals</div>
     <h2>Business Health</h2>
@@ -257,6 +371,9 @@ function renderOverview(ctx) {
   </section>
 
   ${concBlock}
+
+  ${renderTrendsSection(ctx.operational, cur)}
+  ${renderDailyAlertsSection(ctx.operational)}
 
   <section>
     <h2>Top Actions</h2>
@@ -1152,6 +1269,10 @@ section > h2 + .note, section > h2 + p.note { margin: -7px 0 17px; }
 }
 .rec-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
 .rec-list li { border: 1px solid var(--line); border-radius: 11px; padding: 12px; background: #fbfcfa; }
+.alert-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.alert-list li { border: 1px solid var(--line); border-radius: 11px; padding: 10px 12px; background: #fbfcfa; font-size: 13px; line-height: 1.4; }
+.trend-table th, .trend-table td { padding: 8px 10px; }
+.muted { color: var(--muted); }
 .rec-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
 .product-card { border-radius: 13px; padding: 16px; margin-bottom: 11px; border: 1px solid var(--line); background: var(--surface); }
 .product-card.data-issue-card { border-color: #e6c36b; box-shadow: none; }
