@@ -10,6 +10,7 @@ const {
   emptyChannelAccumulators,
   addSaleToChannelAcc,
   addPaidCogsToChannelAcc,
+  addRefundToChannelAcc,
   finalizeChannelAcc,
   buildSalesMixSummary,
 } = require("./salesMix");
@@ -301,7 +302,14 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
         other_non_ad_opex += debit;
       }
     } else if (type === "refund" || /refund/i.test(type)) {
-      refunds += debit || credit;
+      const refundAmount = debit || credit;
+      refunds += refundAmount;
+      // Channel assignment reuses saleChannel(source, ref). Does not reverse COGS.
+      addRefundToChannelAcc(channelAcc, {
+        source,
+        ref,
+        amount: refundAmount,
+      });
     }
   }
 
@@ -340,6 +348,8 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
     recognized_orders,
     recognized_units,
     revenue_ex_tax,
+    net_revenue_ex_tax,
+    refunds,
     paid_cogs,
   });
 

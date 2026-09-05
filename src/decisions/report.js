@@ -81,6 +81,8 @@ function buildDecisionReport({
   // Backward-compatible aliases used by earlier Phase 3.5 consumers
   shopify_context.shopify_recognized_orders = shopify_context.recognized_orders;
   shopify_context.shopify_revenue_ex_tax = shopify_context.revenue_ex_tax;
+  shopify_context.shopify_net_revenue_ex_tax = shopify_context.net_revenue_ex_tax;
+  shopify_context.shopify_refunds = shopify_context.refunds;
 
   const revenue_concentration = buildRevenueConcentration(sales_mix);
 
@@ -162,7 +164,7 @@ function buildDecisionReport({
 
   const one_liner = [
     `Business ${business_health.status}`,
-    `ads safety ${business_advertising_safety.status}`,
+    `ad-spend affordability ${business_advertising_safety.status}`,
     `Meta CPA ${
       meta_efficiency.meta_attributed_cpa == null
         ? "—"
@@ -277,8 +279,14 @@ function printDecisionReport(report, { currency = "PKR" } = {}) {
   } else {
     for (const c of mix) {
       const pad = `${c.channel}:`.padEnd(14);
+      const net =
+        c.net_revenue_ex_tax != null ? c.net_revenue_ex_tax : c.revenue_ex_tax;
+      const share =
+        c.net_revenue_share_pct != null
+          ? c.net_revenue_share_pct
+          : c.revenue_share_pct;
       console.log(
-        `  ${pad}${c.orders} orders · ${formatMoney(c.revenue_ex_tax, cur)} revenue · ${formatPct(c.revenue_share_pct)}`
+        `  ${pad}${c.orders} orders · ${formatMoney(net, cur)} net · ${formatPct(share)}`
       );
     }
   }
@@ -309,7 +317,9 @@ function printDecisionReport(report, { currency = "PKR" } = {}) {
   const scx = report.shopify_context || {};
   console.log("SHOPIFY / ECOMMERCE CONTEXT  (date-aligned — NOT attributed)");
   console.log(`  Shopify orders:            ${formatNumber(scx.recognized_orders, 0)}`);
-  console.log(`  Shopify revenue ex-tax:    ${formatMoney(scx.revenue_ex_tax, cur)}`);
+  console.log(`  Shopify gross revenue:     ${formatMoney(scx.revenue_ex_tax, cur)}`);
+  console.log(`  Shopify refunds:           ${formatMoney(scx.refunds, cur)}`);
+  console.log(`  Shopify net revenue:       ${formatMoney(scx.net_revenue_ex_tax, cur)}`);
   console.log(`  Shopify COGS:              ${formatMoney(scx.cogs, cur)}`);
   console.log(`  Shopify GP before ads:     ${formatMoney(scx.gross_profit_before_ads, cur)}`);
   console.log(`  Shopify GM before ads:     ${formatPct(scx.gross_margin_before_ads_pct)}`);
@@ -326,6 +336,9 @@ function printDecisionReport(report, { currency = "PKR" } = {}) {
   );
   console.log("  Shared opex allocated:     no");
   console.log("  Attribution available:     no");
+  console.log(
+    "  Note: Net revenue after Ledger refunds. Refunds do not auto-reverse COGS."
+  );
   console.log("");
 
   const conc = report.revenue_concentration;

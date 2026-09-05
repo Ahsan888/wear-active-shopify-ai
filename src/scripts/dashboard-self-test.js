@@ -7,6 +7,7 @@ const {
   saleChannel,
   addSaleToChannelAcc,
   addPaidCogsToChannelAcc,
+  addRefundToChannelAcc,
   emptyChannelAccumulators,
   finalizeChannelAcc,
   buildSalesMixSummary,
@@ -285,6 +286,8 @@ test("Shopify GP = revenue - COGS; contribution = GP - Meta", () => {
         orders: 3,
         units: 3,
         revenue_ex_tax: 7153,
+        refunds: 0,
+        net_revenue_ex_tax: 7153,
         cogs: 2000,
         gross_profit: 5153,
         gross_margin_pct: 72.04,
@@ -297,6 +300,317 @@ test("Shopify GP = revenue - COGS; contribution = GP - Meta", () => {
   assert.strictEqual(ctx.contribution_after_meta, 5153 - 8971);
   assert.strictEqual(ctx.opex_allocated, false);
   assert.strictEqual(ctx.attribution_available, false);
+});
+
+test("Shopify sale + no refund → unchanged channel result", () => {
+  const rows = [
+    ["2026-08-01", "Sale", "Shopify", "", "Tee", "S1", "1", "", "1000", "", "", "SALE:SHOPIFY|#1:a", "", ""],
+    ["2026-08-01", "COGS", "Shopify", "", "COGS Tee", "S1", "1", "400", "", "", "", "COGS:SHOPIFY|#1:a", "", ""],
+  ];
+  const agg = aggregateLedgerPeriod(rows, ledgerHeader, "2026-08-01", "2026-08-31", {});
+  assert.strictEqual(agg.sales_by_channel.Shopify.revenue_ex_tax, 1000);
+  assert.strictEqual(agg.sales_by_channel.Shopify.refunds, 0);
+  assert.strictEqual(agg.sales_by_channel.Shopify.net_revenue_ex_tax, 1000);
+  assert.strictEqual(agg.sales_by_channel.Shopify.gross_profit, 600);
+});
+
+test("Shopify refund reduces Shopify net revenue and GP", () => {
+  const rows = [
+    ["2026-08-01", "Sale", "Shopify", "", "Tee", "S1", "1", "", "1000", "", "", "SALE:SHOPIFY|#1:a", "", ""],
+    ["2026-08-01", "COGS", "Shopify", "", "COGS Tee", "S1", "1", "400", "", "", "", "COGS:SHOPIFY|#1:a", "", ""],
+    ["2026-08-02", "Refund", "Shopify", "", "Refund Tee", "S1", "1", "200", "", "", "", "REFUND:SHOPIFY|#1:a", "", ""],
+  ];
+  const agg = aggregateLedgerPeriod(rows, ledgerHeader, "2026-08-01", "2026-08-31", {});
+  assert.strictEqual(agg.sales_by_channel.Shopify.revenue_ex_tax, 1000);
+  assert.strictEqual(agg.sales_by_channel.Shopify.refunds, 200);
+  assert.strictEqual(agg.sales_by_channel.Shopify.net_revenue_ex_tax, 800);
+  assert.strictEqual(agg.sales_by_channel.Shopify.cogs, 400);
+  assert.strictEqual(agg.sales_by_channel.Shopify.gross_profit, 400);
+  assert.strictEqual(agg.books.refunds, 200);
+  assert.strictEqual(agg.books.net_revenue_ex_tax, 800);
+  assert.strictEqual(agg.books.cogs, 400);
+  assert.strictEqual(agg.books.gross_profit, 400);
+});
+
+test("Shopify contribution uses net revenue denominator", () => {
+  const ctx = buildShopifyContributionContext({
+    sales_by_channel: {
+      Shopify: {
+        orders: 1,
+        units: 1,
+        revenue_ex_tax: 1000,
+        refunds: 200,
+        net_revenue_ex_tax: 800,
+        cogs: 400,
+        gross_profit: 400,
+        gross_margin_pct: 50,
+      },
+    },
+    meta_spend: 100,
+    shopify_ad_load_per_recognized_order: 100,
+  });
+  assert.strictEqual(ctx.net_revenue_ex_tax, 800);
+  assert.strictEqual(ctx.gross_profit_before_ads, 400);
+  assert.strictEqual(ctx.contribution_after_meta, 300);
+  assert.strictEqual(ctx.contribution_margin_after_meta_pct, 37.5);
+});
+
+test("Manual refund stays in Manual; Other Sales refund stays in Other Sales", () => {
+  const rows = [
+    ["2026-08-01", "Sale", "Shopify", "", "Tee", "S1", "1", "", "1000", "", "", "SALE:SHOPIFY|#1:a", "", ""],
+    ["2026-08-01", "Sale", "Manual", "", "Tee", "S1", "1", "", "2000", "", "", "SALE:MANUAL:1", "", ""],
+    ["2026-08-01", "Sale", "Other Sales", "", "Bulk", "S1", "1", "", "5000", "", "", "SALE:OTHER:1", "", ""],
+    ["2026-08-02", "Refund", "Manual", "", "Refund", "S1", "1", "300", "", "", "", "REFUND:MANUAL:1", "", ""],
+    ["2026-08-02", "Refund", "Other Sales", "", "Refund", "S1", "1", "500", "", "", "", "REFUND:OTHER:1", "", ""],
+  ];
+  const agg = aggregateLedgerPeriod(rows, ledgerHeader, "2026-08-01", "2026-08-31", {});
+  assert.strictEqual(agg.sales_by_channel.Shopify.refunds, 0);
+  assert.strictEqual(agg.sales_by_channel.Shopify.net_revenue_ex_tax, 1000);
+  assert.strictEqual(agg.sales_by_channel.Manual.refunds, 300);
+  assert.strictEqual(agg.sales_by_channel.Manual.net_revenue_ex_tax, 1700);
+  assert.strictEqual(agg.sales_by_channel["Other Sales"].refunds, 500);
+  assert.strictEqual(agg.sales_by_channel["Other Sales"].net_revenue_ex_tax, 4500);
+  assert.strictEqual(agg.books.refunds, 800);
+  assert.strictEqual(agg.books.revenue_ex_tax, 8000);
+  assert.strictEqual(agg.books.net_revenue_ex_tax, 7200);
+});
+
+test("Refund does not automatically reverse COGS", () => {
+  const rows = [
+    ["2026-08-01", "Sale", "Shopify", "", "Tee", "S1", "1", "", "1000", "", "", "SALE:SHOPIFY|#1:a", "", ""],
+    ["2026-08-01", "COGS", "Shopify", "", "COGS Tee", "S1", "1", "400", "", "", "", "COGS:SHOPIFY|#1:a", "", ""],
+    ["2026-08-02", "Refund", "Shopify", "", "Refund Tee", "S1", "1", "1000", "", "", "", "REFUND:SHOPIFY|#1:a", "", ""],
+  ];
+  const agg = aggregateLedgerPeriod(rows, ledgerHeader, "2026-08-01", "2026-08-31", {});
+  assert.strictEqual(agg.sales_by_channel.Shopify.cogs, 400);
+  assert.strictEqual(agg.sales_by_channel.Shopify.net_revenue_ex_tax, 0);
+  assert.strictEqual(agg.sales_by_channel.Shopify.gross_profit, -400);
+});
+
+test("Explicit Ledger COGS reversal is respected", () => {
+  const rows = [
+    ["2026-08-01", "Sale", "Shopify", "", "Tee", "S1", "1", "", "1000", "", "", "SALE:SHOPIFY|#1:a", "", ""],
+    ["2026-08-01", "COGS", "Shopify", "", "COGS Tee", "S1", "1", "400", "", "", "", "COGS:SHOPIFY|#1:a", "", ""],
+    ["2026-08-02", "Refund", "Shopify", "", "Refund Tee", "S1", "1", "1000", "", "", "", "REFUND:SHOPIFY|#1:a", "", ""],
+    ["2026-08-02", "COGS", "Shopify", "", "COGS reverse", "S1", "-1", "-400", "", "", "", "COGS:SHOPIFY|#1:rev", "", ""],
+  ];
+  const agg = aggregateLedgerPeriod(rows, ledgerHeader, "2026-08-01", "2026-08-31", {});
+  assert.strictEqual(agg.sales_by_channel.Shopify.cogs, 0);
+  assert.strictEqual(agg.books.cogs, 0);
+});
+
+test("zero/negative net Shopify revenue → safe contribution status, no Infinity", () => {
+  const ctx = buildShopifyContributionContext({
+    sales_by_channel: {
+      Shopify: {
+        orders: 1,
+        units: 1,
+        revenue_ex_tax: 500,
+        refunds: 500,
+        net_revenue_ex_tax: 0,
+        cogs: 200,
+        gross_profit: -200,
+        gross_margin_pct: null,
+      },
+    },
+    meta_spend: 100,
+  });
+  assert.strictEqual(ctx.contribution_margin_after_meta_pct, null);
+  assert.strictEqual(ctx.contribution_status, "insufficient_data");
+  assert.ok(Number.isFinite(ctx.contribution_after_meta));
+
+  const neg = buildShopifyContributionContext({
+    sales_by_channel: {
+      Shopify: {
+        orders: 1,
+        units: 1,
+        revenue_ex_tax: 500,
+        refunds: 800,
+        net_revenue_ex_tax: -300,
+        cogs: 0,
+        gross_profit: -300,
+        gross_margin_pct: null,
+      },
+    },
+    meta_spend: 50,
+  });
+  assert.strictEqual(neg.contribution_margin_after_meta_pct, null);
+  assert.strictEqual(neg.contribution_status, "insufficient_data");
+  assert.ok(Number.isFinite(neg.contribution_after_meta));
+});
+
+test("concentration uses net channel revenue; no-refund matches gross", () => {
+  const noRefund = buildSalesMixSummary(
+    {
+      Shopify: {
+        orders: 3,
+        units: 3,
+        revenue_ex_tax: 7153,
+        refunds: 0,
+        net_revenue_ex_tax: 7153,
+        cogs: 0,
+      },
+      Manual: {
+        orders: 25,
+        units: 25,
+        revenue_ex_tax: 56900,
+        refunds: 0,
+        net_revenue_ex_tax: 56900,
+        cogs: 0,
+      },
+      "Other Sales": {
+        orders: 1,
+        units: 1,
+        revenue_ex_tax: 247000,
+        refunds: 0,
+        net_revenue_ex_tax: 247000,
+        cogs: 0,
+      },
+    },
+    {
+      revenue_ex_tax: 311053,
+      net_revenue_ex_tax: 311053,
+      refunds: 0,
+      recognized_orders: 29,
+      recognized_units: 29,
+    }
+  );
+  const concNo = buildRevenueConcentration(noRefund);
+  assert.strictEqual(concNo.basis, "net_revenue");
+  assert.ok(concNo.dominant_channel_revenue_share_pct >= 79);
+  assert.strictEqual(
+    concNo.dominant_channel_revenue_share_pct,
+    noRefund.channels.find((c) => c.channel === "Other Sales").net_revenue_share_pct
+  );
+  assert.strictEqual(
+    noRefund.channels.find((c) => c.channel === "Other Sales").gross_revenue_share_pct,
+    noRefund.channels.find((c) => c.channel === "Other Sales").net_revenue_share_pct
+  );
+
+  const withRefund = buildSalesMixSummary(
+    {
+      Shopify: {
+        orders: 3,
+        units: 3,
+        revenue_ex_tax: 10000,
+        refunds: 5000,
+        net_revenue_ex_tax: 5000,
+        cogs: 0,
+      },
+      Manual: {
+        orders: 1,
+        units: 1,
+        revenue_ex_tax: 1000,
+        refunds: 0,
+        net_revenue_ex_tax: 1000,
+        cogs: 0,
+      },
+      "Other Sales": {
+        orders: 1,
+        units: 1,
+        revenue_ex_tax: 4000,
+        refunds: 0,
+        net_revenue_ex_tax: 4000,
+        cogs: 0,
+      },
+    },
+    {
+      revenue_ex_tax: 15000,
+      net_revenue_ex_tax: 10000,
+      refunds: 5000,
+      recognized_orders: 5,
+      recognized_units: 5,
+    }
+  );
+  const concRefund = buildRevenueConcentration(withRefund);
+  assert.strictEqual(concRefund.dominant_channel, "Shopify");
+  assert.strictEqual(concRefund.dominant_channel_revenue_share_pct, 50);
+  assert.strictEqual(concRefund.is_materially_concentrated, false);
+});
+
+test("exposing channel refunds does not change business health/affordability", () => {
+  const sales_by_channel = {
+    Shopify: {
+      orders: 3,
+      units: 3,
+      revenue_ex_tax: 8000,
+      refunds: 847.44,
+      net_revenue_ex_tax: 7152.56,
+      cogs: 4773.3,
+      gross_profit: 2379.26,
+      gross_margin_pct: 33.26,
+    },
+    Manual: {
+      orders: 25,
+      units: 25,
+      revenue_ex_tax: 56900,
+      refunds: 0,
+      net_revenue_ex_tax: 56900,
+      cogs: 20000,
+      gross_profit: 36900,
+      gross_margin_pct: 64.85,
+    },
+    "Other Sales": {
+      orders: 1,
+      units: 1,
+      revenue_ex_tax: 247000,
+      refunds: 0,
+      net_revenue_ex_tax: 247000,
+      cogs: 80000,
+      gross_profit: 167000,
+      gross_margin_pct: 67.61,
+    },
+  };
+  const sales_mix = buildSalesMixSummary(sales_by_channel, {
+    recognized_orders: 29,
+    recognized_units: 29,
+    revenue_ex_tax: 311900,
+    net_revenue_ex_tax: 311052.56,
+    refunds: 847.44,
+    paid_cogs: 104773.3,
+  });
+  const report = buildDecisionReport({
+    date_range: {
+      since: "2026-08-01",
+      until: "2026-08-07",
+      is_full_calendar_month: false,
+    },
+    books: {
+      net_revenue_ex_tax: 311052.56,
+      revenue_ex_tax: 311900,
+      gross_margin_pct: 67,
+      recognized_orders: 29,
+    },
+    profitability: {
+      meta_adjusted_profit: 68461,
+      meta_adjusted_margin_pct: 22,
+      break_even_cpa: 2670,
+      break_even_ad_spend: 77430,
+      profit_before_ads: 77430,
+    },
+    blended: {
+      business_wide_ad_load_per_recognized_order: 310,
+      shopify_ad_load_per_recognized_order: 2990,
+      blended_ad_cost_per_recognized_order: 310,
+    },
+    sales_by_channel,
+    sales_mix,
+    meta: {
+      account: { currency: "PKR" },
+      totals: { spend: 8971, purchases: 4, cpa: 2242, roas: 1.2 },
+    },
+    products: [],
+    warnings: [],
+    campaigns: [],
+    ads: [],
+  });
+  assert.strictEqual(report.business_health.status, "strongly_profitable");
+  assert.strictEqual(
+    report.business_advertising_safety.status,
+    "large_safety_margin"
+  );
+  assert.ok(report.executive_summary.one_liner.includes("ad-spend affordability"));
+  assert.ok(!report.executive_summary.one_liner.includes("ads safety"));
 });
 
 test("positive contribution status", () => {
@@ -722,6 +1036,8 @@ function fixtureReport(overrides = {}) {
       recognized_orders: 17,
       recognized_units: 100,
       revenue_ex_tax: 200000,
+      refunds: 0,
+      net_revenue_ex_tax: 200000,
       cogs: 80000,
       gross_profit_before_ads: 120000,
       gross_margin_before_ads_pct: 60,
@@ -734,7 +1050,7 @@ function fixtureReport(overrides = {}) {
       contribution_status: "positive_contribution",
       attribution_available: false,
       opex_allocated: false,
-      note: "Date-aligned Shopify contribution context. Meta spend is not order-attributed and shared opex is not allocated.",
+      note: "Date-aligned Shopify contribution context using net recognized Shopify revenue after Ledger refunds.",
     },
     revenue_concentration: {
       dominant_channel: "Shopify",
@@ -959,13 +1275,16 @@ test("HTML shows DATE-ALIGNED · NOT ATTRIBUTED", () => {
 
 test("HTML shows Shopify revenue and COGS", () => {
   const html = renderDecisionDashboard(fixtureReport());
-  assert.ok(html.includes("Shopify revenue ex-tax"));
+  assert.ok(html.includes("Shopify gross revenue") || html.includes("Shopify net revenue"));
   assert.ok(html.includes("Shopify COGS"));
+  assert.ok(html.includes("Shopify refunds"));
+  assert.ok(html.includes("Shopify net revenue"));
 });
 
 test("HTML renders sales mix", () => {
   const html = renderDecisionDashboard(fixtureReport());
   assert.ok(html.includes("Sales Mix"));
+  assert.ok(html.includes("Net Revenue"));
   assert.ok(html.includes("Shopify"));
   assert.ok(html.includes("Manual"));
   assert.ok(html.includes("Other Sales"));
@@ -1063,6 +1382,79 @@ test("terminal labels use Ad-Spend Affordability", () => {
   assert.ok(out.includes("BUSINESS AD-SPEND AFFORDABILITY"));
   assert.ok(out.includes("SHOPIFY / ECOMMERCE CONTEXT"));
   assert.ok(out.includes("Contribution after Meta"));
+  assert.ok(out.includes("Shopify refunds") || out.includes("Shopify net revenue"));
+});
+
+test("executive one-liner says ad-spend affordability", () => {
+  const report = buildDecisionReport({
+    date_range: {
+      since: "2026-08-01",
+      until: "2026-08-07",
+      is_full_calendar_month: false,
+    },
+    books: {
+      net_revenue_ex_tax: 100000,
+      revenue_ex_tax: 100000,
+      gross_margin_pct: 30,
+      recognized_orders: 20,
+    },
+    profitability: {
+      meta_adjusted_profit: 20000,
+      meta_adjusted_margin_pct: 20,
+      break_even_cpa: 2000,
+      break_even_ad_spend: 40000,
+      profit_before_ads: 40000,
+    },
+    blended: {
+      business_wide_ad_load_per_recognized_order: 500,
+      shopify_ad_load_per_recognized_order: 833.33,
+      blended_ad_cost_per_recognized_order: 500,
+    },
+    sales_by_channel: {
+      Shopify: {
+        orders: 12,
+        units: 20,
+        revenue_ex_tax: 60000,
+        refunds: 0,
+        net_revenue_ex_tax: 60000,
+        cogs: 0,
+        gross_profit: 60000,
+        gross_margin_pct: 100,
+      },
+      Manual: {
+        orders: 5,
+        units: 8,
+        revenue_ex_tax: 30000,
+        refunds: 0,
+        net_revenue_ex_tax: 30000,
+        cogs: 0,
+        gross_profit: 30000,
+        gross_margin_pct: 100,
+      },
+      "Other Sales": {
+        orders: 3,
+        units: 4,
+        revenue_ex_tax: 10000,
+        refunds: 0,
+        net_revenue_ex_tax: 10000,
+        cogs: 0,
+        gross_profit: 10000,
+        gross_margin_pct: 100,
+      },
+    },
+    meta: {
+      account: { currency: "PKR" },
+      totals: { spend: 10000, purchases: 4, cpa: 2500, roas: 1.2 },
+    },
+    products: [],
+    warnings: [],
+    campaigns: [],
+    ads: [],
+  });
+  assert.ok(
+    report.executive_summary.one_liner.includes("ad-spend affordability")
+  );
+  assert.ok(!report.executive_summary.one_liner.includes("ads safety"));
 });
 
 test("HTML renders high/medium/low recommendations", () => {

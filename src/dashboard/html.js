@@ -67,9 +67,8 @@ function renderDecisionDashboard(report) {
       (c) => `<tr>
       <td>${escapeHtml(c.channel)}</td>
       <td>${num(c.orders, 0)}</td>
-      <td>${money(c.revenue_ex_tax, cur)}</td>
-      <td>${pct(c.order_share_pct)}</td>
-      <td>${pct(c.revenue_share_pct)}</td>
+      <td title="Gross ${money(c.revenue_ex_tax, cur)} − refunds ${money(c.refunds || 0, cur)}">${money(c.net_revenue_ex_tax != null ? c.net_revenue_ex_tax : c.revenue_ex_tax, cur)}</td>
+      <td>${pct(c.net_revenue_share_pct != null ? c.net_revenue_share_pct : c.revenue_share_pct)}</td>
     </tr>`
     )
     .join("");
@@ -337,13 +336,13 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
   <section>
     <h2>Sales Mix</h2>
     <table>
-      <thead><tr><th>Channel</th><th>Orders</th><th>Revenue</th><th>Order Share</th><th>Revenue Share</th></tr></thead>
+      <thead><tr><th>Channel</th><th>Orders</th><th>Net Revenue</th><th>Revenue Share</th></tr></thead>
       <tbody>
         ${salesRows}
-        <tr><td><strong>Total</strong></td><td><strong>${num(books.recognized_orders, 0)}</strong></td><td><strong>${money(books.revenue_ex_tax ?? report.sales_mix?.totals?.revenue_ex_tax, cur)}</strong></td><td>100%</td><td>100%</td></tr>
+        <tr><td><strong>Total</strong></td><td><strong>${num(books.recognized_orders, 0)}</strong></td><td><strong>${money(books.net_revenue_ex_tax ?? report.sales_mix?.totals?.net_revenue_ex_tax, cur)}</strong></td><td>100%</td></tr>
       </tbody>
     </table>
-    <p class="note">Channels reuse Books saleChannel() (Shopify / Manual / Other Sales). Global profit totals are unchanged.</p>
+    <p class="note">Net revenue = channel gross − Ledger refunds. Hover net revenue for gross/refund detail. Channels reuse Books saleChannel(). Global profit totals are unchanged.</p>
   </section>
 
   ${
@@ -367,7 +366,9 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
     <div class="grid">
       ${card("Shopify orders", num(sc.recognized_orders, 0))}
       ${card("Shopify units", num(sc.recognized_units, 0))}
-      ${card("Shopify revenue ex-tax", money(sc.revenue_ex_tax, cur))}
+      ${card("Shopify gross revenue", money(sc.revenue_ex_tax, cur))}
+      ${card("Shopify refunds", money(sc.refunds ?? 0, cur))}
+      ${card(`Shopify net revenue ${tip(TIPS.shopify_net_revenue)}`, money(sc.net_revenue_ex_tax, cur))}
       ${card("Shopify COGS", money(sc.cogs, cur))}
       ${card("Gross profit before ads", money(sc.gross_profit_before_ads, cur))}
       ${card("Gross margin before ads", pct(sc.gross_margin_before_ads_pct))}

@@ -113,7 +113,9 @@ const TIPS = {
   affordability:
     "Measures whether the overall business economics can absorb current Meta spend. Includes Shopify, Manual and Other Sales. It is not a measure of ecommerce acquisition efficiency.",
   shopify_contribution:
-    "Shopify gross profit before ads minus Meta spend for the same date range. Shared operating expenses are not allocated. Not Meta-attributed profit.",
+    "Shopify gross profit before ads (net Shopify revenue − Shopify COGS) minus Meta spend for the same date range. Shared operating expenses are not allocated. Not Meta-attributed profit. Refunds do not automatically reverse COGS.",
+  shopify_net_revenue:
+    "Shopify net revenue is recognized Shopify revenue after Ledger refunds. COGS is Ledger-driven; refunds do not automatically reverse COGS unless corresponding accounting entries exist.",
 };
 
 module.exports = {

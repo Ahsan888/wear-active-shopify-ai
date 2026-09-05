@@ -1,6 +1,9 @@
 /**
  * Pure sales-mix + ad-load + Shopify contribution helpers (Phase 3.5).
  * Channel labels reuse Books saleChannel() — do not invent alternate rules.
+ *
+ * Channel GP uses net recognized revenue (gross − Ledger refunds).
+ * Refunds do NOT automatically reverse COGS; only explicit Ledger COGS rows apply.
  */
 const { round2 } = require("../books/tax");
 const { safeDiv } = require("../meta/metrics");
@@ -18,6 +21,8 @@ function emptyChannelTotals() {
         orders: 0,
         units: 0,
         revenue_ex_tax: 0,
+        refunds: 0,
+        net_revenue_ex_tax: 0,
         cogs: 0,
         gross_profit: 0,
         gross_margin_pct: null,
@@ -30,7 +35,13 @@ function emptyChannelAccumulators() {
   return Object.fromEntries(
     SALES_CHANNELS.map((name) => [
       name,
-      { orderKeys: new Set(), units: 0, revenue_ex_tax: 0, cogs: 0 },
+      {
+        orderKeys: new Set(),
+        units: 0,
+        revenue_ex_tax: 0,
+        refunds: 0,
+        cogs: 0,
+      },
     ])
   );
 }
@@ -64,6 +75,17 @@ function addPaidCogsToChannelAcc(acc, { source, ref, debit }) {
   return channel;
 }
 
+/**
+ * Record a Ledger refund into channel accumulators (mutates acc).
+ * Amount should match global Books: debit || credit.
+ */
+function addRefundToChannelAcc(acc, { source, ref, amount }) {
+  const channel = saleChannel(source, ref);
+  const bucket = acc[channel] || acc.Manual;
+  bucket.refunds += Number(amount) || 0;
+  return channel;
+}
+
 function finalizeChannelAcc(acc) {
   const sales_by_channel = emptyChannelTotals();
   for (const name of SALES_CHANNELS) {
@@ -71,30 +93,39 @@ function finalizeChannelAcc(acc) {
       orderKeys: new Set(),
       units: 0,
       revenue_ex_tax: 0,
+      refunds: 0,
       cogs: 0,
     };
     const revenue = round2(b.revenue_ex_tax);
+    const refunds = round2(b.refunds);
+    const net = round2(revenue - refunds);
     const cogs = round2(b.cogs);
-    const gp = round2(revenue - cogs);
+    const gp = round2(net - cogs);
     sales_by_channel[name] = {
       orders: b.orderKeys.size,
       units: round2(b.units),
       revenue_ex_tax: revenue,
+      refunds,
+      net_revenue_ex_tax: net,
       cogs,
       gross_profit: gp,
-      gross_margin_pct:
-        revenue > 0 ? round2((gp / revenue) * 100) : null,
+      gross_margin_pct: net > 0 ? round2((gp / net) * 100) : null,
     };
   }
   return sales_by_channel;
 }
 
-function buildSalesMixSummary(sales_by_channel, {
-  recognized_orders,
-  recognized_units,
-  revenue_ex_tax,
-  paid_cogs,
-} = {}) {
+function buildSalesMixSummary(
+  sales_by_channel,
+  {
+    recognized_orders,
+    recognized_units,
+    revenue_ex_tax,
+    net_revenue_ex_tax,
+    refunds,
+    paid_cogs,
+  } = {}
+) {
   const channels = SALES_CHANNELS.map((name) => {
     const row = sales_by_channel?.[name] || emptyChannelTotals()[name];
     return { channel: name, ...row };
@@ -108,25 +139,46 @@ function buildSalesMixSummary(sales_by_channel, {
     recognized_units != null
       ? Number(recognized_units)
       : channels.reduce((s, c) => s + c.units, 0);
-  const total_revenue =
+  const total_gross =
     revenue_ex_tax != null
       ? Number(revenue_ex_tax)
-      : channels.reduce((s, c) => s + c.revenue_ex_tax, 0);
+      : channels.reduce((s, c) => s + Number(c.revenue_ex_tax || 0), 0);
+  const total_refunds =
+    refunds != null
+      ? Number(refunds)
+      : channels.reduce((s, c) => s + Number(c.refunds || 0), 0);
+  const total_net =
+    net_revenue_ex_tax != null
+      ? Number(net_revenue_ex_tax)
+      : round2(total_gross - total_refunds);
   const channel_cogs_sum = round2(
     channels.reduce((s, c) => s + Number(c.cogs || 0), 0)
   );
 
-  const withShares = channels.map((c) => ({
-    ...c,
-    order_share_pct:
-      total_orders > 0 ? round2((c.orders / total_orders) * 100) : 0,
-    revenue_share_pct:
-      total_revenue > 0
-        ? round2((c.revenue_ex_tax / total_revenue) * 100)
-        : 0,
-    unit_share_pct:
-      total_units > 0 ? round2((c.units / total_units) * 100) : 0,
-  }));
+  const withShares = channels.map((c) => {
+    const gross_rev = Number(c.revenue_ex_tax || 0);
+    const net_rev = Number(
+      c.net_revenue_ex_tax != null
+        ? c.net_revenue_ex_tax
+        : gross_rev - Number(c.refunds || 0)
+    );
+    const gross_revenue_share_pct =
+      total_gross > 0 ? round2((gross_rev / total_gross) * 100) : 0;
+    const net_revenue_share_pct =
+      total_net > 0 ? round2((net_rev / total_net) * 100) : 0;
+    return {
+      ...c,
+      net_revenue_ex_tax: round2(net_rev),
+      order_share_pct:
+        total_orders > 0 ? round2((c.orders / total_orders) * 100) : 0,
+      // Backward-compatible alias: historically gross share
+      revenue_share_pct: gross_revenue_share_pct,
+      gross_revenue_share_pct,
+      net_revenue_share_pct,
+      unit_share_pct:
+        total_units > 0 ? round2((c.units / total_units) * 100) : 0,
+    };
+  });
 
   return {
     sales_by_channel,
@@ -134,12 +186,13 @@ function buildSalesMixSummary(sales_by_channel, {
     totals: {
       orders: total_orders,
       units: round2(total_units),
-      revenue_ex_tax: round2(total_revenue),
+      revenue_ex_tax: round2(total_gross),
+      refunds: round2(total_refunds),
+      net_revenue_ex_tax: round2(total_net),
       cogs: channel_cogs_sum,
     },
     channel_cogs_sum,
-    paid_cogs:
-      paid_cogs == null ? null : round2(Number(paid_cogs)),
+    paid_cogs: paid_cogs == null ? null : round2(Number(paid_cogs)),
     shopify_recognized_orders: sales_by_channel?.Shopify?.orders || 0,
     manual_recognized_orders: sales_by_channel?.Manual?.orders || 0,
     other_sales_recognized_orders:
@@ -148,6 +201,12 @@ function buildSalesMixSummary(sales_by_channel, {
     manual_revenue_ex_tax: sales_by_channel?.Manual?.revenue_ex_tax || 0,
     other_sales_revenue_ex_tax:
       sales_by_channel?.["Other Sales"]?.revenue_ex_tax || 0,
+    shopify_net_revenue_ex_tax:
+      sales_by_channel?.Shopify?.net_revenue_ex_tax || 0,
+    manual_net_revenue_ex_tax:
+      sales_by_channel?.Manual?.net_revenue_ex_tax || 0,
+    other_sales_net_revenue_ex_tax:
+      sales_by_channel?.["Other Sales"]?.net_revenue_ex_tax || 0,
   };
 }
 
@@ -192,17 +251,22 @@ function computeAdLoadMetrics({
 
 /**
  * Descriptive Shopify contribution status — display only; never drives Phase 3 gates.
+ * Uses net Shopify revenue as the economic base.
  */
 function classifyShopifyContributionStatus({
+  net_revenue_ex_tax,
   revenue_ex_tax,
   contribution_after_meta,
   contribution_margin_after_meta_pct,
 } = {}) {
-  const rev = Number(revenue_ex_tax || 0);
-  if (!(rev > 0)) {
+  const net =
+    net_revenue_ex_tax != null
+      ? Number(net_revenue_ex_tax)
+      : Number(revenue_ex_tax || 0);
+  if (!(net > 0)) {
     return {
       status: "insufficient_data",
-      reason: "No Shopify recognized revenue in period",
+      reason: "No positive Shopify net recognized revenue in period",
     };
   }
   const contrib = Number(contribution_after_meta || 0);
@@ -213,6 +277,7 @@ function classifyShopifyContributionStatus({
 
   if (
     margin != null &&
+    Number.isFinite(margin) &&
     Math.abs(margin) <= SHOPIFY_NEAR_ZERO_MARGIN_ABS_PCT
   ) {
     return {
@@ -234,6 +299,7 @@ function classifyShopifyContributionStatus({
 
 /**
  * Date-aligned Shopify channel contribution vs Meta spend (not attributed, no opex).
+ * Uses net recognized Shopify revenue (gross − Ledger refunds).
  */
 function buildShopifyContributionContext({
   sales_by_channel,
@@ -242,14 +308,21 @@ function buildShopifyContributionContext({
 } = {}) {
   const shopify = sales_by_channel?.Shopify || emptyChannelTotals().Shopify;
   const spend = round2(Number(meta_spend || 0));
-  const revenue = Number(shopify.revenue_ex_tax || 0);
-  const cogs = Number(shopify.cogs || 0);
-  const gp = round2(revenue - cogs);
+  const revenue = round2(Number(shopify.revenue_ex_tax || 0));
+  const refunds = round2(Number(shopify.refunds || 0));
+  const net =
+    shopify.net_revenue_ex_tax != null
+      ? round2(Number(shopify.net_revenue_ex_tax))
+      : round2(revenue - refunds);
+  const cogs = round2(Number(shopify.cogs || 0));
+  const gp = round2(net - cogs);
   const contribution = round2(gp - spend);
   const contribution_margin =
-    revenue > 0 ? round2((contribution / revenue) * 100) : null;
+    net > 0 && Number.isFinite(contribution / net)
+      ? round2((contribution / net) * 100)
+      : null;
   const statusInfo = classifyShopifyContributionStatus({
-    revenue_ex_tax: revenue,
+    net_revenue_ex_tax: net,
     contribution_after_meta: contribution,
     contribution_margin_after_meta_pct: contribution_margin,
   });
@@ -257,16 +330,22 @@ function buildShopifyContributionContext({
   return {
     recognized_orders: shopify.orders || 0,
     recognized_units: shopify.units || 0,
-    revenue_ex_tax: round2(revenue),
-    cogs: round2(cogs),
+    revenue_ex_tax: revenue,
+    refunds,
+    net_revenue_ex_tax: net,
+    cogs,
     gross_profit_before_ads: gp,
-    gross_margin_before_ads_pct: shopify.gross_margin_pct,
+    gross_margin_before_ads_pct:
+      shopify.gross_margin_pct != null
+        ? shopify.gross_margin_pct
+        : net > 0
+          ? round2((gp / net) * 100)
+          : null,
     meta_spend: spend,
     ad_load_per_recognized_order:
       shopify_ad_load_per_recognized_order == null
         ? null
         : Number(shopify_ad_load_per_recognized_order),
-    // Backward-compatible alias
     shopify_ad_load_per_recognized_order:
       shopify_ad_load_per_recognized_order == null
         ? null
@@ -278,12 +357,13 @@ function buildShopifyContributionContext({
     attribution_available: false,
     opex_allocated: false,
     note:
-      "Date-aligned Shopify contribution context. Meta spend is not order-attributed and shared opex is not allocated.",
+      "Date-aligned Shopify contribution context using net recognized Shopify revenue after Ledger refunds. Meta spend is not order-attributed. Shared opex is not allocated. Refunds do not automatically reverse COGS unless corresponding Ledger COGS entries exist.",
   };
 }
 
 /**
  * Revenue concentration diagnostic (business_context — not a data-quality error).
+ * Uses net channel revenue shares when available.
  */
 function buildRevenueConcentration(sales_mix) {
   const channels = sales_mix?.channels || [];
@@ -296,13 +376,28 @@ function buildRevenueConcentration(sales_mix) {
       non_shopify_distortion_risk: false,
       warning: null,
       category: "business_context",
+      basis: "net_revenue",
     };
   }
-  const sorted = [...channels].sort(
-    (a, b) => Number(b.revenue_share_pct || 0) - Number(a.revenue_share_pct || 0)
-  );
+  const sorted = [...channels].sort((a, b) => {
+    const sa = Number(
+      a.net_revenue_share_pct != null
+        ? a.net_revenue_share_pct
+        : a.revenue_share_pct || 0
+    );
+    const sb = Number(
+      b.net_revenue_share_pct != null
+        ? b.net_revenue_share_pct
+        : b.revenue_share_pct || 0
+    );
+    return sb - sa;
+  });
   const top = sorted[0];
-  const share = Number(top.revenue_share_pct || 0);
+  const share = Number(
+    top.net_revenue_share_pct != null
+      ? top.net_revenue_share_pct
+      : top.revenue_share_pct || 0
+  );
   const is_materially_concentrated =
     share >= REVENUE_CONCENTRATION_THRESHOLD_PCT;
   const non_shopify_distortion_risk =
@@ -311,7 +406,7 @@ function buildRevenueConcentration(sales_mix) {
   let warning = null;
   if (non_shopify_distortion_risk) {
     warning =
-      `${share}% of recognized revenue in this period came from ${top.channel}. ` +
+      `${share}% of recognized net revenue in this period came from ${top.channel}. ` +
       `Whole-business profitability and ad-spend affordability are therefore not representative of ecommerce performance alone.`;
   }
 
@@ -323,6 +418,7 @@ function buildRevenueConcentration(sales_mix) {
     non_shopify_distortion_risk,
     warning,
     category: "business_context",
+    basis: "net_revenue",
   };
 }
 
@@ -336,6 +432,7 @@ module.exports = {
   resolveSaleOrderKey,
   addSaleToChannelAcc,
   addPaidCogsToChannelAcc,
+  addRefundToChannelAcc,
   finalizeChannelAcc,
   buildSalesMixSummary,
   computeAdLoadMetrics,

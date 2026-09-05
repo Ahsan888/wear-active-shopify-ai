@@ -61,18 +61,31 @@ This is **not** ecommerce acquisition efficiency. Shopify metrics do not drive t
 
 ## Shopify contribution (date-aligned — not attributed)
 
-Separate economic view for the Shopify channel only:
+Separate economic view for the Shopify channel only. Contribution uses **net** recognized Shopify revenue after Ledger refunds:
 
 ```text
-shopify_gross_profit_before_ads = shopify_revenue_ex_tax − shopify_cogs
+shopify_net_revenue_ex_tax = shopify_revenue_ex_tax − shopify_refunds
+shopify_gross_profit_before_ads = shopify_net_revenue_ex_tax − shopify_cogs
 shopify_contribution_after_meta = shopify_gross_profit_before_ads − meta_spend
 shopify_contribution_margin_after_meta =
-  shopify_revenue_ex_tax > 0
-    ? shopify_contribution_after_meta / shopify_revenue_ex_tax
+  shopify_net_revenue_ex_tax > 0
+    ? shopify_contribution_after_meta / shopify_net_revenue_ex_tax
     : null
 ```
 
+| Field | Meaning |
+|---|---|
+| Gross channel revenue | Sum of paid Sale credits for the channel |
+| Channel refunds | Ledger refund rows assigned via `saleChannel(source, ref)` |
+| Net channel revenue | Gross − refunds |
+| Channel GP before ads | Net revenue − channel paid COGS |
+| Contribution after Meta | Channel GP before ads − Meta spend (date-aligned) |
+
 Displayed as **Shopify contribution after Meta**.
+
+### Refunds and COGS
+
+Refunds reduce channel **net revenue**. They do **not** automatically reverse channel COGS. COGS remains Ledger-driven: only explicit COGS / reverse-COGS accounting rows change channel COGS. Phase 3.5 does not invent inventory restoration.
 
 ### Why it is not Shopify profit
 
@@ -93,13 +106,26 @@ A display-only `contribution_status` (`positive_contribution` / `near_zero` / `n
 
 Break-even CPA uses **all-business** pre-ad profit ÷ **all** recognized orders. Comparing a Shopify-only denominator to that threshold would be another provenance mismatch.
 
+## Sales mix share fields
+
+Per channel JSON exposes:
+
+* `revenue_ex_tax` (gross)
+* `refunds`
+* `net_revenue_ex_tax`
+* `gross_revenue_share_pct`
+* `net_revenue_share_pct`
+* `revenue_share_pct` — **backward-compatible alias of gross share**
+
+Dashboard Sales Mix and revenue concentration use **net** shares.
+
 ## Revenue concentration
 
-When one channel’s revenue share is ≥ 60%, `revenue_concentration` flags material concentration (`category: business_context`).
+When one channel’s **net** revenue share is ≥ 60%, `revenue_concentration` flags material concentration (`category: business_context`, `basis: net_revenue`).
 
 If the dominant channel is **not** Shopify, a non-alarmist **Business mix context** warning explains that whole-business profitability and ad-spend affordability are heavily influenced by non-Shopify sales — and are therefore not representative of ecommerce alone.
 
-This does **not** invalidate revenue, suppress profitability calculations, or change classifiers.
+This does **not** invalidate revenue, suppress profitability calculations, or change classifiers. With zero refunds, concentration matches the pre-refund-fix result.
 
 ## Attribution limitations
 
