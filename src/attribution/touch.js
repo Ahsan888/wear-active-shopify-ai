@@ -25,6 +25,7 @@ function emptyTouch() {
 
 function isBlankTouch(t) {
   if (!t) return true;
+  // _fbp alone is supporting Meta browser context — not acquisition evidence
   return !(
     t.source ||
     t.medium ||
@@ -33,7 +34,6 @@ function isBlankTouch(t) {
     t.term ||
     t.fbclid ||
     t.fbc ||
-    t.fbp ||
     t.campaign_id ||
     t.adset_id ||
     t.ad_id
@@ -118,28 +118,38 @@ function touchFromJourneyVisit(visit) {
   });
 }
 
+function isExpiredTouch(touch, now, retentionDays) {
+  if (!touch?.timestamp) return true;
+  const t = new Date(touch.timestamp).getTime();
+  if (Number.isNaN(t)) return true;
+  return now.getTime() - t > retentionDays * 86400000;
+}
+
 /**
  * Merge visit into stored attribution state.
  * - first_touch: set once within retention; never overwritten by direct
  * - last_touch: update only on attributable visits (not internal/direct)
+ * - expired window + direct → clear stale acquisition evidence
  */
 function applyVisit(state, visitTouch, { now = new Date(), retentionDays = DEFAULT_RETENTION_DAYS } = {}) {
   const version = 1;
   const current = state && typeof state === "object" ? state : { version };
-  const first = current.first_touch || null;
-  const last = current.last_touch || null;
+  let first = current.first_touch || null;
+  let last = current.last_touch || null;
 
-  const expired =
-    first?.timestamp &&
-    now.getTime() - new Date(first.timestamp).getTime() >
-      retentionDays * 86400000;
+  const firstExpired = first ? isExpiredTouch(first, now, retentionDays) : true;
+  const lastExpired = last ? isExpiredTouch(last, now, retentionDays) : true;
+
+  if (firstExpired) first = null;
+  if (lastExpired) last = null;
 
   let nextFirst = first;
-  if (!first || expired || isBlankTouch(first)) {
+  if (!first || isBlankTouch(first)) {
     if (isAttributableTouch(visitTouch)) nextFirst = visitTouch;
+    else if (!first && isDirectTouch(visitTouch)) nextFirst = visitTouch;
     else if (!first) nextFirst = visitTouch;
   } else if (isDirectTouch(visitTouch)) {
-    // keep paid first touch
+    // keep paid first touch within retention
     nextFirst = first;
   }
 
@@ -148,10 +158,10 @@ function applyVisit(state, visitTouch, { now = new Date(), retentionDays = DEFAU
     nextLast = visitTouch;
   } else if (!last && isAttributableTouch(nextFirst)) {
     nextLast = nextFirst;
-  } else if (!last) {
+  } else if (!last && isDirectTouch(visitTouch) && !isAttributableTouch(nextFirst)) {
     nextLast = visitTouch;
   }
-  // direct return does not erase last attributable
+  // direct return does not erase last attributable within retention
 
   return {
     version,
@@ -174,6 +184,7 @@ module.exports = {
   isBlankTouch,
   isDirectTouch,
   isAttributableTouch,
+  isExpiredTouch,
   touchFromParams,
   touchFromJourneyVisit,
   touchFromLandingUrl,

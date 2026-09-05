@@ -1,7 +1,8 @@
 /**
  * Fetch Shopify orders with attribution surfaces (journey + cart attrs).
+ * Pagination is bounded and fails loudly if results would be truncated.
  */
-const { graphql } = require("../shopify/client");
+const shopifyClient = require("../shopify/client");
 const { trailingWindow, todayYmd } = require("../operations/dates");
 
 const ORDER_ATTR_QUERY = `#graphql
@@ -38,19 +39,40 @@ const ORDER_ATTR_QUERY = `#graphql
   }
 `;
 
-async function fetchOrdersForAttribution({ since, until, maxPages = 20 } = {}) {
+const DEFAULT_MAX_PAGES = 20;
+
+/**
+ * @param {{ since: string, until: string, maxPages?: number, graphqlFn?: Function }} opts
+ */
+async function fetchOrdersForAttribution({
+  since,
+  until,
+  maxPages = DEFAULT_MAX_PAGES,
+  graphqlFn,
+} = {}) {
+  const runGraphql = graphqlFn || shopifyClient.graphql;
   const query = `created_at:>=${since} created_at:<=${until}`;
   const orders = [];
   let cursor = null;
-  for (let page = 0; page < maxPages; page += 1) {
-    const data = await graphql(ORDER_ATTR_QUERY, { query, cursor });
+  const pages = Math.max(1, Number(maxPages) || DEFAULT_MAX_PAGES);
+
+  for (let page = 0; page < pages; page += 1) {
+    const data = await runGraphql(ORDER_ATTR_QUERY, { query, cursor });
     const conn = data.orders;
     for (const edge of conn.edges || []) {
       orders.push(edge.node);
     }
-    if (!conn.pageInfo?.hasNextPage) break;
+    if (!conn.pageInfo?.hasNextPage) {
+      return orders;
+    }
+    if (page === pages - 1) {
+      throw new Error(
+        `Attribution order fetch exceeded maxPages=${pages}; refusing partial results`
+      );
+    }
     cursor = conn.pageInfo.endCursor;
   }
+
   return orders;
 }
 
@@ -67,4 +89,5 @@ module.exports = {
   fetchOrdersForAttribution,
   resolveAttributionWindow,
   ORDER_ATTR_QUERY,
+  DEFAULT_MAX_PAGES,
 };

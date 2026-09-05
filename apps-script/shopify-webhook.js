@@ -279,7 +279,17 @@ function getGatewayNote_(order) {
   return g.length ? g.join(", ") : "";
 }
 
-/** Phase 5A — parse cart/order note attributes into LIVE attribution columns. */
+/** Phase 5A — parse cart/order note attributes into LIVE attribution columns.
+ *  Raw touch columns only. Authoritative Status/Confidence/Phase come from
+ *  books live-enrich / attribution normalizer (not storefront classifiers).
+ */
+function sheetSafeAttribution_(value) {
+  if (value == null || value === "") return "";
+  const s = String(value);
+  if (/^[=+\-@]/.test(s)) return "'" + s;
+  return s;
+}
+
 function extractAttributionFromOrder_(order) {
   const notes = {};
   const list = order.note_attributes || [];
@@ -305,18 +315,25 @@ function extractAttributionFromOrder_(order) {
     notes.wa_ft_fbclid
   );
   return {
-    attribution_status: notes.wa_attr_status || "",
-    first_source: first.source || notes.wa_ft_source || "",
-    first_campaign:
-      first.campaign || first.campaign_id || notes.wa_ft_campaign || "",
-    first_content: first.content || first.ad_id || notes.wa_ft_content || "",
-    last_source: last.source || notes.wa_lt_source || "",
-    last_campaign:
-      last.campaign || last.campaign_id || notes.wa_lt_campaign || "",
-    last_content: last.content || last.ad_id || notes.wa_lt_content || "",
+    attribution_status: "",
+    first_source: sheetSafeAttribution_(first.source || notes.wa_ft_source || ""),
+    first_campaign: sheetSafeAttribution_(
+      first.campaign || first.campaign_id || notes.wa_ft_campaign || ""
+    ),
+    first_content: sheetSafeAttribution_(
+      first.content || first.ad_id || notes.wa_ft_content || ""
+    ),
+    last_source: sheetSafeAttribution_(last.source || notes.wa_lt_source || ""),
+    last_campaign: sheetSafeAttribution_(
+      last.campaign || last.campaign_id || notes.wa_lt_campaign || ""
+    ),
+    last_content: sheetSafeAttribution_(
+      last.content || last.ad_id || notes.wa_lt_content || ""
+    ),
     meta_click: hasClick ? "Y" : "N",
-    attribution_version:
-      (payload && payload.version) || notes.wa_attr_version || "",
+    attribution_version: sheetSafeAttribution_(
+      (payload && payload.version) || notes.wa_attr_version || ""
+    ),
   };
 }
 

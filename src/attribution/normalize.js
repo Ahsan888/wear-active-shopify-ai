@@ -5,6 +5,7 @@ const {
   ATTRIBUTION_VERSION,
   DEFAULT_CAPTURE_STARTED_AT,
   META_SOURCES,
+  parseCaptureStartedAt,
 } = require("./constants");
 const { sanitizeString, sanitizeTimestamp } = require("./sanitize");
 const {
@@ -42,6 +43,7 @@ function confidenceFor(touch, status) {
   if (!touch || isBlankTouch(touch) || status === "unattributed" || status === "unknown") {
     return "none";
   }
+  // _fbp alone never elevates confidence — supporting metadata only
   if (status === "meta_first_party") {
     if (hasMetaClickEvidence(touch) && hasStableMetaIds(touch)) return "high";
     if (hasMetaClickEvidence(touch) || hasStableMetaIds(touch)) return "high";
@@ -152,7 +154,13 @@ function normalizeOrderAttribution(order = {}, options = {}) {
     options.capture_started_at || DEFAULT_CAPTURE_STARTED_AT;
   const createdAt = order.createdAt || order.created_at || order.processed_at;
   const created = createdAt ? new Date(createdAt) : null;
-  const captureStart = new Date(captureStarted);
+  let captureStart;
+  try {
+    captureStart = parseCaptureStartedAt(captureStarted);
+  } catch {
+    captureStart = parseCaptureStartedAt(DEFAULT_CAPTURE_STARTED_AT);
+  }
+  // createdAt < capture_started_at → pre_capture; >= → post_capture
   const phase =
     created && !Number.isNaN(created.getTime()) && created < captureStart
       ? "pre_capture"
@@ -191,6 +199,10 @@ function normalizeOrderAttribution(order = {}, options = {}) {
 
   // Shopify customer journey (historical + current)
   const journey = order.customerJourneySummary || order.customer_journey_summary;
+  const journeyReady = journey == null ? null : journey.ready !== false;
+  if (journey && journey.ready === false) {
+    warnings.push("journey_not_ready");
+  }
   if (journey?.firstVisit) {
     const jt = touchFromJourneyVisit(journey.firstVisit);
     if (!first || isBlankTouch(first)) first = jt;
@@ -239,13 +251,20 @@ function normalizeOrderAttribution(order = {}, options = {}) {
     : first;
   let status = classifyStatus(primary);
 
+  const hasCartEvidence = Boolean(payload && !payload._malformed);
+  const hasJourneyVisit = Boolean(journey?.firstVisit || journey?.lastVisit);
   if (
     phase === "post_capture" &&
     status === "unattributed" &&
-    !payload &&
-    !journey?.firstVisit
+    !hasCartEvidence &&
+    !hasJourneyVisit
   ) {
-    warnings.push("post_capture_order_missing_attribution");
+    // Do not treat journey_not_ready alone as definitive missing attribution
+    if (journey && journey.ready === false) {
+      // journey_not_ready already warned — skip premature missing warning
+    } else {
+      warnings.push("post_capture_order_missing_attribution");
+    }
   }
 
   if (hasMetaUtm(primary) && !hasMetaClickEvidence(primary) && !hasStableMetaIds(primary)) {
@@ -263,6 +282,7 @@ function normalizeOrderAttribution(order = {}, options = {}) {
     click_id: hasMetaClickEvidence(primary),
     stable_ids: hasStableMetaIds(primary),
     utm_meta: isMetaSource(primary.source),
+    fbp_only: Boolean(primary.fbp) && isBlankTouch({ ...primary, fbp: null }),
     campaign_id: primary.campaign_id || null,
     adset_id: primary.adset_id || null,
     ad_id: primary.ad_id || null,
@@ -278,6 +298,7 @@ function normalizeOrderAttribution(order = {}, options = {}) {
     last_attributable_touch: last_attributable,
     meta_evidence,
     warnings,
+    journey_ready: journeyReady,
     source: primary.source || null,
     usable: status !== "unattributed" && status !== "unknown" && confidence !== "none"
       ? true

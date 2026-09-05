@@ -104,9 +104,54 @@ Day 1 Meta → Day 2 direct purchase keeps Meta as first + last attributable.
 
 ## Capture start
 
-`ATTRIBUTION_CAPTURE_STARTED_AT` (default `2026-09-06`).
+`ATTRIBUTION_CAPTURE_STARTED_AT` must be the **actual** production storefront
+tracking activation time (ISO timestamp preferred), e.g.:
 
-Coverage prefers **post_capture** Shopify orders so historical empties do not tank the KPI.
+```bash
+ATTRIBUTION_CAPTURE_STARTED_AT=2026-09-08T14:37:00+05:00
+```
+
+Date-only values remain accepted. Do **not** set this until the Dawn theme
+capture script is published. Coverage prefers **post_capture** Shopify orders.
+
+Semantics:
+
+- `order.createdAt < capture_started_at` → `pre_capture`
+- `order.createdAt >= capture_started_at` → `post_capture`
+
+Pre-capture orders must not produce `post_capture_order_missing_attribution`.
+
+## Roles
+
+| Layer | Responsibility |
+|---|---|
+| Dawn theme | Capture evidence only (UTMs, click IDs, cart attrs) |
+| Reporting normalizer | Authoritative status, confidence, warnings |
+| Webhook | Raw touch columns into LIVE (sheet-safe) |
+| live-enrich | Authoritative Attribution Status / Confidence / Phase |
+
+## Consent
+
+Storefront consent is tri-state: `allowed` · `denied` · `unknown`.
+
+Capture/sync only when `allowed`. Unknown or denied → skip silently.
+Cart and checkout always continue to work.
+
+## Cart sync
+
+Idempotent: fingerprint stored in `wa_attribution_cart_sync_v1` only after
+HTTP 2xx from `/cart/update.js`. Unchanged state does not re-POST.
+
+## Payload
+
+`_wa_attr` is always valid compact JSON ≤ 1800 chars (never mid-JSON sliced).
+`landing_page` / `referrer` store origin+pathname only (no arbitrary query).
+
+## Accelerated checkout limitation
+
+Buy Now / Shop Pay / dynamic checkout buttons may bypass cart attributes on
+Shopify Basic. Documented coverage gap — do not disable accelerated checkout
+solely for attribution without explicit approval.
 
 ## CLI
 
@@ -146,10 +191,13 @@ campaign_id={{campaign.id}}&adset_id={{adset.id}}&ad_id={{ad.id}}
 
 **Operational caution:** Editing live ad URLs / URL parameters can trigger Meta review or learning resets depending on how changes are applied. Treat as a separate approved change — Phase 5A is read-only on Meta.
 
+Apply Meta URL template **after** storefront capture is proven.
+
 ## Theme repo
 
 Branch: `feat/first-party-attribution`  
-Asset: `assets/wa-attribution.js` included from `layout/theme.liquid`.
+Asset: `assets/wa-attribution.js` included from `layout/theme.liquid`.  
+Theme tests: `node scripts/wa-attribution-self-test.js`
 
 ## Phase 5B activation criteria (recommended)
 

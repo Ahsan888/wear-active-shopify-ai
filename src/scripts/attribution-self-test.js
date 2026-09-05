@@ -428,5 +428,209 @@ test("isAttributableTouch", () => {
   assert.ok(isAttributableTouch(touchFromParams({ utm_source: "facebook", utm_medium: "paid" })));
 });
 
+test("pagination: one-page result", async () => {
+  const { fetchOrdersForAttribution } = require("../attribution/fetchOrders");
+  const calls = [];
+  const orders = await fetchOrdersForAttribution({
+    since: "2026-09-01",
+    until: "2026-09-06",
+    maxPages: 3,
+    graphqlFn: async (_q, vars) => {
+      calls.push(vars.cursor);
+      return {
+        orders: {
+          pageInfo: { hasNextPage: false, endCursor: null },
+          edges: [{ node: { id: "1", name: "#1" } }],
+        },
+      };
+    },
+  });
+  assert.strictEqual(orders.length, 1);
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0], null);
+});
+
+test("pagination: multiple pages + cursor advances", async () => {
+  const { fetchOrdersForAttribution } = require("../attribution/fetchOrders");
+  const cursors = [];
+  const orders = await fetchOrdersForAttribution({
+    since: "2026-09-01",
+    until: "2026-09-06",
+    maxPages: 5,
+    graphqlFn: async (_q, vars) => {
+      cursors.push(vars.cursor);
+      if (!vars.cursor) {
+        return {
+          orders: {
+            pageInfo: { hasNextPage: true, endCursor: "c1" },
+            edges: [{ node: { id: "1" } }],
+          },
+        };
+      }
+      return {
+        orders: {
+          pageInfo: { hasNextPage: false, endCursor: "c2" },
+          edges: [{ node: { id: "2" } }],
+        },
+      };
+    },
+  });
+  assert.strictEqual(orders.length, 2);
+  assert.deepStrictEqual(cursors, [null, "c1"]);
+});
+
+test("pagination: exactly maxPages with no next page", async () => {
+  const { fetchOrdersForAttribution } = require("../attribution/fetchOrders");
+  let page = 0;
+  const orders = await fetchOrdersForAttribution({
+    since: "2026-09-01",
+    until: "2026-09-06",
+    maxPages: 2,
+    graphqlFn: async () => {
+      page += 1;
+      return {
+        orders: {
+          pageInfo: {
+            hasNextPage: page < 2,
+            endCursor: page < 2 ? `c${page}` : null,
+          },
+          edges: [{ node: { id: String(page) } }],
+        },
+      };
+    },
+  });
+  assert.strictEqual(orders.length, 2);
+});
+
+test("pagination: maxPages + hasNextPage throws (no partial)", async () => {
+  const { fetchOrdersForAttribution } = require("../attribution/fetchOrders");
+  let threw = false;
+  try {
+    await fetchOrdersForAttribution({
+      since: "2026-09-01",
+      until: "2026-09-06",
+      maxPages: 2,
+      graphqlFn: async (_q, vars) => ({
+        orders: {
+          pageInfo: { hasNextPage: true, endCursor: vars.cursor || "c1" },
+          edges: [{ node: { id: "x" } }],
+        },
+      }),
+    });
+  } catch (err) {
+    threw = true;
+    assert.ok(/exceeded maxPages=2/.test(err.message));
+    assert.ok(/refusing partial results/.test(err.message));
+  }
+  assert.ok(threw);
+});
+
+test("capture-start ISO timestamp + boundary tests", () => {
+  const { parseCaptureStartedAt } = require("../attribution/constants");
+  const start = "2026-09-08T14:37:00+05:00";
+  const cap = parseCaptureStartedAt(start);
+  assert.ok(!Number.isNaN(cap.getTime()));
+
+  const before = normalizeOrderAttribution(
+    { createdAt: new Date(cap.getTime() - 1000).toISOString() },
+    { capture_started_at: start }
+  );
+  const at = normalizeOrderAttribution(
+    { createdAt: cap.toISOString() },
+    { capture_started_at: start }
+  );
+  const after = normalizeOrderAttribution(
+    { createdAt: new Date(cap.getTime() + 1000).toISOString() },
+    { capture_started_at: start }
+  );
+  assert.strictEqual(before.phase, "pre_capture");
+  assert.strictEqual(at.phase, "post_capture");
+  assert.strictEqual(after.phase, "post_capture");
+  assert.ok(!before.warnings.includes("post_capture_order_missing_attribution"));
+});
+
+test("date-only capture start still accepted", () => {
+  const { parseCaptureStartedAt } = require("../attribution/constants");
+  const d = parseCaptureStartedAt("2026-09-06");
+  assert.ok(!Number.isNaN(d.getTime()));
+});
+
+test("pre_capture missing attribution does not warn", () => {
+  const n = normalizeOrderAttribution(
+    { createdAt: "2026-08-01T00:00:00Z" },
+    { capture_started_at: "2026-09-06" }
+  );
+  assert.strictEqual(n.phase, "pre_capture");
+  assert.ok(!n.warnings.includes("post_capture_order_missing_attribution"));
+});
+
+test("journey_not_ready warning without premature missing", () => {
+  const n = normalizeOrderAttribution(
+    {
+      createdAt: "2026-09-07T00:00:00Z",
+      customerJourneySummary: { ready: false },
+    },
+    { capture_started_at: "2026-09-06" }
+  );
+  assert.ok(n.warnings.includes("journey_not_ready"));
+  assert.ok(!n.warnings.includes("post_capture_order_missing_attribution"));
+});
+
+test("_fbp alone is not Meta acquisition / not high confidence", () => {
+  const t = touchFromParams({}, { fbp: "fb.1.123.456" });
+  assert.ok(!isAttributableTouch(t));
+  assert.strictEqual(classifyStatus(t), "unattributed");
+  assert.strictEqual(confidenceFor(t, "unattributed"), "none");
+  const n = normalizeOrderAttribution({
+    customAttributes: [
+      {
+        key: "_wa_attr",
+        value: JSON.stringify({
+          version: 1,
+          first_touch: { fbp: "fb.1.123.456", timestamp: "2026-09-07T00:00:00Z" },
+          last_touch: { fbp: "fb.1.123.456", timestamp: "2026-09-07T00:00:00Z" },
+        }),
+      },
+    ],
+  });
+  assert.strictEqual(n.status, "unattributed");
+  assert.notStrictEqual(n.confidence, "high");
+});
+
+test("expired first + direct clears stale acquisition", () => {
+  const old = touchFromParams(
+    { utm_source: "facebook", utm_medium: "paid", fbclid: "old" },
+    { timestamp: "2020-01-01T00:00:00.000Z" }
+  );
+  const state = { version: 1, first_touch: old, last_touch: old };
+  const next = applyVisit(state, touchFromParams({ utm_source: "direct" }), {
+    now: new Date("2026-09-06T00:00:00Z"),
+    retentionDays: 30,
+  });
+  assert.ok(!next.first_touch || !next.first_touch.fbclid);
+});
+
+test("spreadsheet formula injection guarded", () => {
+  const { sheetSafe } = require("../attribution/sanitize");
+  assert.strictEqual(sheetSafe("=IMPORTXML(A1)"), "'=IMPORTXML(A1)");
+  assert.strictEqual(sheetSafe("+123"), "'+123");
+  assert.strictEqual(sheetSafe("-cmd"), "'-cmd");
+  assert.strictEqual(sheetSafe("@sum"), "'@sum");
+  const w = extractWebhookAttribution({
+    note_attributes: [
+      {
+        name: "_wa_attr",
+        value: JSON.stringify({
+          version: 1,
+          first_touch: { source: "=cmd", campaign: "+evil" },
+        }),
+      },
+    ],
+  });
+  assert.ok(w.first_source.startsWith("'"));
+  assert.ok(w.first_campaign.startsWith("'"));
+  assert.strictEqual(w.attribution_status, "");
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exitCode = 1;
