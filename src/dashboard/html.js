@@ -39,6 +39,8 @@ function renderDecisionDashboard(report) {
   const fb = report.meta?.funnel_baselines || {};
   const totals = report.meta?.totals || {};
   const recon = report.data_quality?.ad_reconciliation || {};
+  const conc = report.revenue_concentration || {};
+  const contribTone = statusClass(sc.contribution_status);
 
   const attention = (report.ads || []).filter((a) =>
     [
@@ -270,6 +272,22 @@ th { font-size: 12px; color: var(--muted); font-weight: 600; }
 .scale-title { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 700; }
 .conf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
 .conf-item { border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.section-shopify {
+  border-color: #99f6e4;
+  background: linear-gradient(180deg, #f0fdfa 0%, #ffffff 40%);
+}
+.section-context {
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+.divider-label {
+  font-size: 11px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 700;
+  margin: 4px 0 12px;
+}
 footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: center; }
 @media (max-width: 640px) {
   .wrap { padding: 18px 14px 48px; }
@@ -304,6 +322,19 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
   </section>
 
   <section>
+    <h2>Business Ad-Spend Affordability ${tip(TIPS.affordability)}</h2>
+    <p class="note">Whole-business view. Manual and Other Sales contribute to the economics. Not ecommerce acquisition efficiency.</p>
+    <div class="grid">
+      ${card("Status", `<span class="pill tone-${statusClass(bas.status)}">${escapeHtml(prettyStatus(bas.status))}</span>`, "", statusClass(bas.status))}
+      ${card("Meta spend", money(bas.meta_spend, cur))}
+      ${card(`Business-wide ad load / order ${tip(TIPS.business_wide_ad_load)}`, money(bas.business_wide_ad_load_per_recognized_order ?? bas.blended_ad_cost_per_recognized_order, cur))}
+      ${card(`Business break-even CPA ${tip(TIPS.break_even_cpa)}`, money(bas.break_even_cpa, cur))}
+      ${card("Headroom", `${money(bas.business_cpa_headroom, cur)} (${pct(bas.business_cpa_headroom_pct)})`)}
+      ${card("Ad-spend utilization", pct(bas.ad_spend_utilization_pct))}
+    </div>
+  </section>
+
+  <section>
     <h2>Sales Mix</h2>
     <table>
       <thead><tr><th>Channel</th><th>Orders</th><th>Revenue</th><th>Order Share</th><th>Revenue Share</th></tr></thead>
@@ -315,28 +346,37 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; text-align: cen
     <p class="note">Channels reuse Books saleChannel() (Shopify / Manual / Other Sales). Global profit totals are unchanged.</p>
   </section>
 
-  <section>
-    <h2>Advertising Safety</h2>
-    <div class="grid-2">
-      <div>
-        <h3 style="margin:0 0 10px;font-size:16px;">Business Economics</h3>
-        <div class="grid">
-          ${card("Meta spend", money(bas.meta_spend, cur))}
-          ${card(`Business-wide ad load / order ${tip(TIPS.business_wide_ad_load)}`, money(bas.business_wide_ad_load_per_recognized_order ?? bas.blended_ad_cost_per_recognized_order, cur))}
-          ${card(`Business break-even CPA ${tip(TIPS.break_even_cpa)}`, money(bas.break_even_cpa, cur))}
-          ${card("Headroom", `${money(bas.business_cpa_headroom, cur)} (${pct(bas.business_cpa_headroom_pct)})`, prettyStatus(bas.status), statusClass(bas.status))}
-          ${card("Ad-spend utilization", pct(bas.ad_spend_utilization_pct))}
-        </div>
-      </div>
-      <div>
-        <h3 style="margin:0 0 10px;font-size:16px;">Shopify Context</h3>
-        <div class="grid">
-          ${card("Shopify recognized orders", num(sc.shopify_recognized_orders, 0))}
-          ${card(`Shopify ad load / order ${tip(TIPS.shopify_ad_load)}`, money(sc.shopify_ad_load_per_recognized_order, cur))}
-        </div>
-        <p class="note"><strong>Not CAC.</strong> ${escapeHtml(sc.note || "Meta spend ÷ Shopify orders — blended context only; does not imply Meta caused those orders. Not compared to business break-even CPA.")}</p>
-      </div>
+  ${
+    conc.non_shopify_distortion_risk
+      ? `<section class="section-context">
+    <h2>Business Mix Context</h2>
+    <p><strong>${escapeHtml(conc.dominant_channel)}</strong> contributed <strong>${pct(conc.dominant_channel_revenue_share_pct)}</strong> of recognized revenue in this period.</p>
+    <p class="note">${escapeHtml(conc.warning || "")}</p>
+  </section>`
+      : ""
+  }
+
+  <section class="section-shopify">
+    <div class="divider-label">Shopify / Ecommerce Context</div>
+    <h2>Shopify Contribution ${tip(TIPS.shopify_contribution)}</h2>
+    <div class="badge-row" style="margin-bottom:12px">
+      <span class="badge">DATE-ALIGNED · NOT ATTRIBUTED</span>
+      <span class="badge">Shared opex not allocated</span>
+      <span class="pill tone-${contribTone}">${escapeHtml(prettyStatus(sc.contribution_status || "—"))}</span>
     </div>
+    <div class="grid">
+      ${card("Shopify orders", num(sc.recognized_orders, 0))}
+      ${card("Shopify units", num(sc.recognized_units, 0))}
+      ${card("Shopify revenue ex-tax", money(sc.revenue_ex_tax, cur))}
+      ${card("Shopify COGS", money(sc.cogs, cur))}
+      ${card("Gross profit before ads", money(sc.gross_profit_before_ads, cur))}
+      ${card("Gross margin before ads", pct(sc.gross_margin_before_ads_pct))}
+      ${card("Meta spend", money(sc.meta_spend, cur))}
+      ${card(`Shopify ad load / order ${tip(TIPS.shopify_ad_load)}`, money(sc.ad_load_per_recognized_order ?? sc.shopify_ad_load_per_recognized_order, cur))}
+      ${card("Contribution after Meta", money(sc.contribution_after_meta, cur), escapeHtml(sc.contribution_status_reason || ""), contribTone)}
+      ${card("Contribution margin after Meta", pct(sc.contribution_margin_after_meta_pct), "", contribTone)}
+    </div>
+    <p class="note">${escapeHtml(sc.note || "Meta spend is compared with Shopify channel economics for the same date range. This does not mean every Shopify order came from Meta, and no shared operating expenses are allocated here.")}</p>
   </section>
 
   <section>

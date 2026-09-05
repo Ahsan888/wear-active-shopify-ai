@@ -9,6 +9,7 @@ const { isRecognized } = require("../books/recognition");
 const {
   emptyChannelAccumulators,
   addSaleToChannelAcc,
+  addPaidCogsToChannelAcc,
   finalizeChannelAcc,
   buildSalesMixSummary,
 } = require("./salesMix");
@@ -273,6 +274,7 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
         giftProductCosts[key].cogs += debit;
         giftProductCosts[key].units += qty;
       } else {
+        addPaidCogsToChannelAcc(channelAcc, { source, ref, debit });
         const bucket = ensureProductBucket(products, sku, description, catalogBySku);
         bucket.cogs += debit;
       }
@@ -333,11 +335,29 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
   }));
 
   const sales_by_channel = finalizeChannelAcc(channelAcc);
+  const paid_cogs = round2(cogs - gift_cogs);
   const sales_mix = buildSalesMixSummary(sales_by_channel, {
     recognized_orders,
     recognized_units,
     revenue_ex_tax,
+    paid_cogs,
   });
+
+  // Soft coverage check — do not alter Books totals
+  const channel_cogs_gap = round2(
+    paid_cogs - Number(sales_mix.channel_cogs_sum || 0)
+  );
+  if (Math.abs(channel_cogs_gap) > 1) {
+    sales_mix.channel_cogs_coverage_warning = {
+      code: "channel_cogs_coverage_gap",
+      severity: "info",
+      message:
+        `Paid Books COGS (${paid_cogs}) and summed channel COGS (${sales_mix.channel_cogs_sum}) differ by ${channel_cogs_gap}. Official Books totals unchanged.`,
+      paid_cogs,
+      channel_cogs_sum: sales_mix.channel_cogs_sum,
+      gap: channel_cogs_gap,
+    };
+  }
 
   return {
     books: {

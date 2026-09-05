@@ -22,6 +22,10 @@ const {
 const { classifyProducts } = require("./products");
 const { buildConfidenceAndGates } = require("./confidence");
 const { buildRecommendations } = require("./recommendations");
+const {
+  buildShopifyContributionContext,
+  buildRevenueConcentration,
+} = require("../profitability/salesMix");
 
 /**
  * Pure assembly from already-loaded profitability + meta entity rows.
@@ -50,32 +54,35 @@ function buildDecisionReport({
     net_revenue_ex_tax: books?.net_revenue_ex_tax,
   });
 
-  const business_advertising_safety = classifyBusinessAdvertisingSafety({
-    meta_spend: metaTotals.spend,
-    recognized_orders: books?.recognized_orders,
-    break_even_cpa: profitability?.break_even_cpa,
-    break_even_ad_spend: profitability?.break_even_ad_spend,
-    net_revenue_ex_tax: books?.net_revenue_ex_tax,
-    blended_ad_cost_per_recognized_order:
-      blended?.business_wide_ad_load_per_recognized_order ??
-      blended?.blended_ad_cost_per_recognized_order,
-  });
+  const business_advertising_safety = {
+    ...classifyBusinessAdvertisingSafety({
+      meta_spend: metaTotals.spend,
+      recognized_orders: books?.recognized_orders,
+      break_even_cpa: profitability?.break_even_cpa,
+      break_even_ad_spend: profitability?.break_even_ad_spend,
+      net_revenue_ex_tax: books?.net_revenue_ex_tax,
+      blended_ad_cost_per_recognized_order:
+        blended?.business_wide_ad_load_per_recognized_order ??
+        blended?.blended_ad_cost_per_recognized_order,
+    }),
+    display_label: "Business Ad-Spend Affordability",
+    display_note:
+      "Measures whether the overall business economics can absorb current Meta spend. Includes Shopify, Manual and Other Sales. It is not a measure of ecommerce acquisition efficiency.",
+  };
 
-  const shopify_context = {
-    shopify_recognized_orders:
-      books?.shopify_recognized_orders ??
-      sales_mix?.shopify_recognized_orders ??
-      sales_by_channel?.Shopify?.orders ??
-      0,
+  const resolved_sales_by_channel =
+    sales_by_channel || sales_mix?.sales_by_channel || null;
+  const shopify_context = buildShopifyContributionContext({
+    sales_by_channel: resolved_sales_by_channel,
+    meta_spend: metaTotals.spend,
     shopify_ad_load_per_recognized_order:
       blended?.shopify_ad_load_per_recognized_order ?? null,
-    shopify_revenue_ex_tax:
-      sales_mix?.shopify_revenue_ex_tax ??
-      sales_by_channel?.Shopify?.revenue_ex_tax ??
-      0,
-    note:
-      "Meta spend divided by recognized Shopify orders in the same period. Blended context only — not Meta CAC, not Shopify CAC, and not attributed CPA. Not compared to business break-even CPA.",
-  };
+  });
+  // Backward-compatible aliases used by earlier Phase 3.5 consumers
+  shopify_context.shopify_recognized_orders = shopify_context.recognized_orders;
+  shopify_context.shopify_revenue_ex_tax = shopify_context.revenue_ex_tax;
+
+  const revenue_concentration = buildRevenueConcentration(sales_mix);
 
   const meta_efficiency = buildMetaEfficiency(metaTotals);
   const roas_diagnostic = buildRoasCrossProvenanceDiagnostic({
@@ -182,8 +189,9 @@ function buildDecisionReport({
     business_health,
     business_advertising_safety,
     shopify_context,
-    sales_by_channel: sales_by_channel || sales_mix?.sales_by_channel || null,
+    sales_by_channel: resolved_sales_by_channel,
     sales_mix: sales_mix || null,
+    revenue_concentration,
     meta_efficiency,
     roas_cross_provenance: roas_diagnostic,
     meta: {
@@ -276,33 +284,59 @@ function printDecisionReport(report, { currency = "PKR" } = {}) {
   }
   console.log("");
 
-  console.log("BUSINESS ADVERTISING SAFETY  (Meta spend ÷ all Books orders vs BE CPA)");
+  console.log("BUSINESS AD-SPEND AFFORDABILITY");
   console.log(`  Status:                    ${String(bas.status).toUpperCase()}`);
   console.log(`  Meta spend:                ${formatMoney(bas.meta_spend, cur)}`);
   console.log(
-    `  Business-wide ad load / order: ${formatMoney(
+    `  Business-wide ad load:     ${formatMoney(
       bas.business_wide_ad_load_per_recognized_order ??
         bas.blended_ad_cost_per_recognized_order,
       cur
     )}`
   );
+  console.log(`  Business break-even CPA:   ${formatMoney(bas.break_even_cpa, cur)}`);
   console.log(
-    `  Shopify ad load / order:       ${formatMoney(
-      report.shopify_context?.shopify_ad_load_per_recognized_order,
-      cur
-    )}`
-  );
-  console.log(`  Business break-even CPA:       ${formatMoney(bas.break_even_cpa, cur)}`);
-  console.log(
-    `  Business CPA headroom:     ${formatMoney(bas.business_cpa_headroom, cur)} (${formatPct(bas.business_cpa_headroom_pct)})`
+    `  Headroom:                  ${formatMoney(bas.business_cpa_headroom, cur)} (${formatPct(bas.business_cpa_headroom_pct)})`
   );
   console.log(
     `  Ad spend utilization:      ${formatPct(bas.ad_spend_utilization_pct)} of BE ad spend`
   );
   console.log(
-    "  Note: Shopify ad load is context only (not CAC; not compared to BE CPA)."
+    "  Note: Whole-business view including Shopify + Manual + Other Sales. Not ecommerce acquisition efficiency."
   );
   console.log("");
+
+  const scx = report.shopify_context || {};
+  console.log("SHOPIFY / ECOMMERCE CONTEXT  (date-aligned — NOT attributed)");
+  console.log(`  Shopify orders:            ${formatNumber(scx.recognized_orders, 0)}`);
+  console.log(`  Shopify revenue ex-tax:    ${formatMoney(scx.revenue_ex_tax, cur)}`);
+  console.log(`  Shopify COGS:              ${formatMoney(scx.cogs, cur)}`);
+  console.log(`  Shopify GP before ads:     ${formatMoney(scx.gross_profit_before_ads, cur)}`);
+  console.log(`  Shopify GM before ads:     ${formatPct(scx.gross_margin_before_ads_pct)}`);
+  console.log(`  Meta spend:                ${formatMoney(scx.meta_spend, cur)}`);
+  console.log(
+    `  Shopify ad load / order:   ${formatMoney(scx.ad_load_per_recognized_order ?? scx.shopify_ad_load_per_recognized_order, cur)}`
+  );
+  console.log(
+    `  Contribution after Meta:   ${formatMoney(scx.contribution_after_meta, cur)}`
+  );
+  console.log(
+    `  Contribution margin:       ${formatPct(scx.contribution_margin_after_meta_pct)}` +
+      (scx.contribution_status ? `  [${scx.contribution_status}]` : "")
+  );
+  console.log("  Shared opex allocated:     no");
+  console.log("  Attribution available:     no");
+  console.log("");
+
+  const conc = report.revenue_concentration;
+  if (conc?.non_shopify_distortion_risk) {
+    console.log("BUSINESS MIX CONTEXT");
+    console.log(
+      `  Dominant channel:          ${conc.dominant_channel} (${formatPct(conc.dominant_channel_revenue_share_pct)})`
+    );
+    console.log(`  Warning:                   ${conc.warning}`);
+    console.log("");
+  }
 
   console.log("META ATTRIBUTED EFFICIENCY  (platform — not business CAC)");
   console.log(`  Meta attributed CPA:       ${formatMoney(me.meta_attributed_cpa, cur)}`);

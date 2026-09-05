@@ -177,6 +177,23 @@ function printHuman(report) {
   console.log(
     `  Shopify ad load / order:       ${money(blend.shopify_ad_load_per_recognized_order, cur)}`
   );
+  const shopifyCh = report.sales_by_channel?.Shopify;
+  if (shopifyCh) {
+    const shopifyGp =
+      shopifyCh.gross_profit != null
+        ? Number(shopifyCh.gross_profit)
+        : Number(shopifyCh.revenue_ex_tax || 0) - Number(shopifyCh.cogs || 0);
+    const shopifyContrib = shopifyGp - Number(m.spend || 0);
+    console.log("");
+    console.log("SHOPIFY / ECOMMERCE CONTEXT  (date-aligned — NOT attributed)");
+    console.log(`  Shopify orders:               ${formatNumber(shopifyCh.orders, 0)}`);
+    console.log(`  Shopify revenue ex-tax:       ${money(shopifyCh.revenue_ex_tax, cur)}`);
+    console.log(`  Shopify COGS:                 ${money(shopifyCh.cogs, cur)}`);
+    console.log(`  Shopify GP before ads:        ${money(shopifyGp, cur)}`);
+    console.log(
+      `  Contribution after Meta:      ${money(shopifyContrib, cur)}  (shared opex not allocated)`
+    );
+  }
   console.log(`  Business break-even CPA:       ${money(p.break_even_cpa, cur)}`);
   console.log(
     "  Note: Shopify ad load = Meta spend ÷ Shopify orders (context only; not CAC / not attributed)."

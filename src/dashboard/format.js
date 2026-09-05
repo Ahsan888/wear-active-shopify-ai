@@ -46,6 +46,7 @@ function statusClass(status) {
       "scale_candidate",
       "ok",
       "high",
+      "positive_contribution",
     ].includes(s)
   ) {
     return "ok";
@@ -61,6 +62,7 @@ function statusClass(status) {
       "medium",
       "warning",
       "partial_period_not_comparable",
+      "near_zero",
     ].includes(s)
   ) {
     return "warn";
@@ -77,6 +79,7 @@ function statusClass(status) {
       "critical",
       "low",
       "unavailable",
+      "negative_contribution",
     ].includes(s)
   ) {
     return "bad";
@@ -107,6 +110,10 @@ const TIPS = {
   meta_roas: "Purchase value attributed by Meta divided by Meta spend.",
   blended_mer:
     "Recognized business revenue divided by Meta spend; not attributed ROAS.",
+  affordability:
+    "Measures whether the overall business economics can absorb current Meta spend. Includes Shopify, Manual and Other Sales. It is not a measure of ecommerce acquisition efficiency.",
+  shopify_contribution:
+    "Shopify gross profit before ads minus Meta spend for the same date range. Shared operating expenses are not allocated. Not Meta-attributed profit.",
 };
 
 module.exports = {
