@@ -94,6 +94,17 @@ Key modules:
 | Blended MER | Recognized business revenue / Meta spend |
 | Recognized Order | Order satisfying Books recognition rules |
 | Open Pipeline | Shopify orders not yet recognized — **not revenue** |
+| **Paid Sales Gross Margin** | Paid-channel net revenue ÷ paid-channel COGS economics (Shopify + Manual + Other Sales). **Excludes Gift/PR COGS.** |
+| **Books Gross Margin** | Official Ledger net revenue and **all** official COGS, **including Gift/PR COGS.** |
+
+### Paid Sales GM vs Books GM
+
+These margins may differ. That is intentional.
+
+* **Sales & Channels → Paid Sales Total** answers: how did paid recognized sales perform after product COGS?
+* **Profitability → Books Gross Margin** answers: what does official accounting show after all Ledger COGS (including Gift/PR)?
+
+Gift/PR stock-outs are kept in Books COGS but excluded from paid channel COGS so channel contribution is not distorted.
 
 ## CPA display semantics (Advertising / Decisions)
 

@@ -1920,7 +1920,193 @@ test("bundle does not mutate inputs / presentation only", () => {
   assert.strictEqual(bundle.safety.no_meta_mutations, true);
 });
 
+test("paid-channel COGS/GP/GM from salesMix (excludes gift)", () => {
+  const rows = [
+    ["2026-08-01", "Sale", "Shopify", "", "Tee", "S1", "1", "", "1000", "", "", "SALE:SHOPIFY|#1:a", "", ""],
+    ["2026-08-01", "COGS", "Shopify", "", "COGS Tee", "S1", "1", "400", "", "", "", "COGS:SHOPIFY|#1:a", "", ""],
+    ["2026-08-01", "Sale", "Manual", "", "Tee", "S1", "1", "", "2000", "", "", "SALE:MANUAL:1", "", ""],
+    ["2026-08-01", "COGS", "Manual", "", "COGS Tee", "S1", "1", "700", "", "", "", "COGS:MANUAL:1", "", ""],
+    ["2026-08-01", "Sale", "Other Sales", "", "Bulk", "S1", "1", "", "3000", "", "", "SALE:OTHER:1", "", ""],
+    ["2026-08-01", "COGS", "Other Sales", "", "COGS Bulk", "S1", "1", "1000", "", "", "", "COGS:OTHER:1", "", ""],
+    ["2026-08-01", "Gift", "Shopify", "", "Gift", "S1", "1", "", "0", "", "", "GIFT:SHOPIFY|#9:a", "", ""],
+    ["2026-08-01", "COGS", "Shopify", "", "COGS Gift", "S1", "1", "350", "", "", "", "COGS:SHOPIFY|#9:a", "", ""],
+  ];
+  const agg = aggregateLedgerPeriod(rows, ledgerHeader, "2026-08-01", "2026-08-31", {});
+  const t = agg.sales_mix.totals;
+  assert.strictEqual(t.paid_channel_cogs, 2100);
+  assert.strictEqual(t.cogs, 2100); // BC alias = paid channel sum
+  assert.strictEqual(agg.books.gift_cogs, 350);
+  assert.strictEqual(agg.books.cogs, 2450);
+  assert.strictEqual(t.net_revenue_ex_tax, 6000);
+  assert.strictEqual(t.paid_channel_gross_profit, 3900);
+  assert.strictEqual(t.paid_channel_gross_margin_pct, 65);
+  assert.strictEqual(agg.sales_mix.cogs_reconciliation.status, "reconciled");
+  assert.strictEqual(agg.sales_mix.cogs_reconciliation.gift_cogs, 350);
+  // Gift COGS lowers Books GM vs paid-channel GM
+  assert.ok(agg.books.gross_margin_pct < t.paid_channel_gross_margin_pct);
+});
+
+test("refunds reduce paid-channel net before GP/GM; zero net → GM null", () => {
+  const rows = [
+    ["2026-08-01", "Sale", "Shopify", "", "Tee", "S1", "1", "", "1000", "", "", "SALE:SHOPIFY|#1:a", "", ""],
+    ["2026-08-01", "COGS", "Shopify", "", "COGS Tee", "S1", "1", "400", "", "", "", "COGS:SHOPIFY|#1:a", "", ""],
+    ["2026-08-02", "Refund", "Shopify", "", "Refund", "S1", "1", "1000", "", "", "", "REFUND:SHOPIFY|#1:a", "", ""],
+  ];
+  const agg = aggregateLedgerPeriod(rows, ledgerHeader, "2026-08-01", "2026-08-31", {});
+  assert.strictEqual(agg.sales_mix.totals.net_revenue_ex_tax, 0);
+  assert.strictEqual(agg.sales_mix.totals.paid_channel_gross_profit, -400);
+  assert.strictEqual(agg.sales_mix.totals.paid_channel_gross_margin_pct, null);
+});
+
+test("Sales HTML renders Paid Sales Total GM from upstream totals", () => {
+  const mix = buildSalesMixSummary(
+    {
+      Shopify: {
+        orders: 3,
+        units: 3,
+        revenue_ex_tax: 7153,
+        refunds: 0,
+        net_revenue_ex_tax: 7153,
+        cogs: 4773,
+        gross_profit: 2380,
+        gross_margin_pct: 33.27,
+      },
+      Manual: {
+        orders: 25,
+        units: 25,
+        revenue_ex_tax: 56900,
+        refunds: 0,
+        net_revenue_ex_tax: 56900,
+        cogs: 20000,
+        gross_profit: 36900,
+        gross_margin_pct: 64.85,
+      },
+      "Other Sales": {
+        orders: 1,
+        units: 1,
+        revenue_ex_tax: 247000,
+        refunds: 0,
+        net_revenue_ex_tax: 247000,
+        cogs: 80000,
+        gross_profit: 167000,
+        gross_margin_pct: 67.61,
+      },
+    },
+    {
+      recognized_orders: 29,
+      recognized_units: 29,
+      revenue_ex_tax: 311053,
+      net_revenue_ex_tax: 311053,
+      refunds: 0,
+      paid_cogs: 104773,
+    }
+  );
+  assert.ok(mix.totals.paid_channel_gross_margin_pct != null);
+  const html = renderUnifiedDashboard(
+    unifiedFixture({
+      sales_by_channel: mix.sales_by_channel,
+      sales_mix: mix,
+      books: {
+        ...unifiedFixture().books,
+        gross_margin_pct: 29.87,
+        cogs: 105123,
+        gift_cogs: 350,
+        net_revenue_ex_tax: 311053,
+      },
+    })
+  );
+  assert.ok(html.includes("Paid Sales Total"));
+  assert.ok(html.includes("Gift/PR"));
+  assert.ok(html.includes("Paid Sales GM"));
+  assert.ok(html.includes("Books GM") || /Gross margin/i.test(html));
+  // Must show a numeric paid GM, not em dash alone in total row context
+  assert.ok(
+    html.includes(`${mix.totals.paid_channel_gross_margin_pct}%`) ||
+      html.includes(String(mix.totals.paid_channel_gross_margin_pct))
+  );
+  // Renderer must not invent gross_margin_pct on totals
+  assert.strictEqual(mix.totals.gross_margin_pct, undefined);
+});
+
+test("unified bundle passes paid_channel totals through", () => {
+  const mix = buildSalesMixSummary(
+    {
+      Shopify: {
+        orders: 1,
+        units: 1,
+        revenue_ex_tax: 1000,
+        refunds: 0,
+        net_revenue_ex_tax: 1000,
+        cogs: 400,
+        gross_profit: 600,
+        gross_margin_pct: 60,
+      },
+      Manual: {
+        orders: 0,
+        units: 0,
+        revenue_ex_tax: 0,
+        refunds: 0,
+        net_revenue_ex_tax: 0,
+        cogs: 0,
+        gross_profit: 0,
+        gross_margin_pct: null,
+      },
+      "Other Sales": {
+        orders: 0,
+        units: 0,
+        revenue_ex_tax: 0,
+        refunds: 0,
+        net_revenue_ex_tax: 0,
+        cogs: 0,
+        gross_profit: 0,
+        gross_margin_pct: null,
+      },
+    },
+    { revenue_ex_tax: 1000, net_revenue_ex_tax: 1000, refunds: 0, recognized_orders: 1 }
+  );
+  const bundle = buildUnifiedReportingBundle({
+    date_range: {
+      since: "2026-08-01",
+      until: "2026-08-07",
+      is_full_calendar_month: false,
+    },
+    books: {
+      net_revenue_ex_tax: 1000,
+      revenue_ex_tax: 1000,
+      gross_margin_pct: 50,
+      recognized_orders: 1,
+      cogs: 500,
+      gift_cogs: 100,
+    },
+    profitability: {
+      meta_adjusted_profit: 100,
+      meta_adjusted_margin_pct: 10,
+      break_even_cpa: 200,
+      break_even_ad_spend: 200,
+      profit_before_ads: 200,
+    },
+    blended: { business_wide_ad_load_per_recognized_order: 50 },
+    sales_by_channel: mix.sales_by_channel,
+    sales_mix: mix,
+    meta: {
+      account: { currency: "PKR" },
+      totals: { spend: 50, purchases: 1, cpa: 50, roas: 1 },
+    },
+    products: [],
+    warnings: [],
+    campaigns: [],
+    ads: [],
+    adsets: [],
+  });
+  assert.strictEqual(
+    bundle.sales_mix.totals.paid_channel_gross_margin_pct,
+    60
+  );
+  assert.strictEqual(bundle.sales_mix.totals.paid_channel_cogs, 400);
+});
+
 if (!process.exitCode) {
   console.log("\nAll dashboard / sales-mix / unified reporting tests passed.");
 }
+
 

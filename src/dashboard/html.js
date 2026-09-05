@@ -365,30 +365,16 @@ function renderProfitability(ctx) {
 }
 
 function renderSales(ctx) {
-  const { cur, report, sc, conc } = ctx;
+  const { cur, report, sc, conc, books } = ctx;
   const sbc = report.sales_by_channel || {};
+  const mixTotals = report.sales_mix?.totals || {};
   const channels = CHANNEL_ORDER.filter((n) => sbc[n]).concat(
     Object.keys(sbc).filter((k) => !CHANNEL_ORDER.includes(k))
   );
 
-  let totOrders = 0;
-  let totUnits = 0;
-  let totGross = 0;
-  let totRefunds = 0;
-  let totNet = 0;
-  let totCogs = 0;
-  let totGp = 0;
-
   const channelRows = channels
     .map((name) => {
       const c = sbc[name];
-      totOrders += Number(c.orders || 0);
-      totUnits += Number(c.units || 0);
-      totGross += Number(c.revenue_ex_tax || 0);
-      totRefunds += Number(c.refunds || 0);
-      totNet += Number(c.net_revenue_ex_tax ?? c.revenue_ex_tax ?? 0);
-      totCogs += Number(c.cogs || 0);
-      totGp += Number(c.gross_profit ?? 0);
       const gm = pct(c.gross_margin_pct);
       return `<tr>
       <td>${escapeHtml(name)}</td>
@@ -404,8 +390,24 @@ function renderSales(ctx) {
     })
     .join("");
 
-  const mixTotals = report.sales_mix?.totals || {};
-  const totalGm = pct(mixTotals.gross_margin_pct);
+  // Authoritative paid-sales totals from sales_mix (not recomputed in HTML)
+  const paidOrders =
+    mixTotals.orders != null ? mixTotals.orders : null;
+  const paidUnits = mixTotals.units != null ? mixTotals.units : null;
+  const paidGross =
+    mixTotals.revenue_ex_tax != null ? mixTotals.revenue_ex_tax : null;
+  const paidRefunds =
+    mixTotals.refunds != null ? mixTotals.refunds : null;
+  const paidNet =
+    mixTotals.net_revenue_ex_tax != null
+      ? mixTotals.net_revenue_ex_tax
+      : null;
+  const paidCogs =
+    mixTotals.paid_channel_cogs != null
+      ? mixTotals.paid_channel_cogs
+      : mixTotals.cogs;
+  const paidGp = mixTotals.paid_channel_gross_profit;
+  const paidGm = pct(mixTotals.paid_channel_gross_margin_pct);
 
   const concSection = conc?.dominant_channel
     ? `<section>
@@ -420,7 +422,7 @@ function renderSales(ctx) {
   <section>
     <div class="divider-label">Whole Business · Channel View</div>
     <h2>Sales by Channel</h2>
-    <p class="note">Recognized sales economics by channel. Monetary columns are shown net of the relevant Ledger entries.</p>
+    <p class="note">Recognized paid-sales economics by channel. Gift/PR COGS is excluded here; official Books COGS (including Gift/PR) is on Profitability.</p>
     <table class="sales-table">
       <thead><tr>
         <th>Channel</th><th>Orders</th><th>Units</th><th>Gross</th><th>Refunds</th>
@@ -429,18 +431,19 @@ function renderSales(ctx) {
       <tbody>
         ${channelRows || `<tr><td colspan="9" class="empty">No channel data.</td></tr>`}
         <tr class="total-row">
-          <td><strong>Total</strong></td>
-          <td><strong>${num(totOrders, 0)}</strong></td>
-          <td><strong>${num(totUnits, 0)}</strong></td>
-          <td><strong>${money(totGross, cur)}</strong></td>
-          <td><strong>${money(totRefunds, cur)}</strong></td>
-          <td><strong>${money(totNet, cur)}</strong></td>
-          <td><strong>${money(totCogs, cur)}</strong></td>
-          <td><strong>${money(totGp, cur)}</strong></td>
-          <td><strong>${totalGm}</strong></td>
+          <td><strong>Paid Sales Total ${tip(TIPS.paid_sales_total)}</strong></td>
+          <td><strong>${num(paidOrders, 0)}</strong></td>
+          <td><strong>${num(paidUnits, 0)}</strong></td>
+          <td><strong>${money(paidGross, cur)}</strong></td>
+          <td><strong>${money(paidRefunds, cur)}</strong></td>
+          <td><strong>${money(paidNet, cur)}</strong></td>
+          <td><strong>${money(paidCogs, cur)}</strong></td>
+          <td><strong>${money(paidGp, cur)}</strong></td>
+          <td><strong>${paidGm}</strong></td>
         </tr>
       </tbody>
     </table>
+    <p class="note">${tip(TIPS.paid_sales_gm)} Paid Sales GM excludes Gift/PR COGS. Books GM (Profitability) includes official Ledger COGS.</p>
   </section>
 
   <section class="section-shopify">
@@ -457,6 +460,8 @@ function renderSales(ctx) {
     <div class="grid" style="margin-top:14px">
       ${card("Shopify ad load / order", money(sc.ad_load_per_recognized_order ?? sc.shopify_ad_load_per_recognized_order, cur), "", "neutral", TIPS.shopify_ad_load)}
       ${card("Gross margin before ads", pct(sc.gross_margin_before_ads_pct))}
+      ${card("Paid Sales GM", paidGm, "Excludes Gift/PR COGS", "neutral", TIPS.paid_sales_gm)}
+      ${card("Books GM", pct(books.gross_margin_pct), "Includes Gift/PR COGS", "neutral", TIPS.books_gross_margin)}
     </div>
   </section>
 

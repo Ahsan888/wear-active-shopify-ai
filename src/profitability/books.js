@@ -369,6 +369,19 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
     };
   }
 
+  const residual = round2(
+    Number(cogs) -
+      Number(gift_cogs) -
+      Number(sales_mix.totals?.paid_channel_cogs || 0)
+  );
+  sales_mix.cogs_reconciliation = {
+    books_cogs: round2(cogs),
+    paid_channel_cogs: sales_mix.totals.paid_channel_cogs,
+    gift_cogs: round2(gift_cogs),
+    residual,
+    status: Math.abs(residual) <= 1 ? "reconciled" : "gap",
+  };
+
   return {
     books: {
       gross_collected: round2(gross_collected),

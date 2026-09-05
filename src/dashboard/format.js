@@ -164,6 +164,8 @@ const TIPS = {
     "Books economics with booked Ads expense replaced analytically by actual date-aligned Meta spend. Meta spend is not double-counted.",
   books_net_profit:
     "Accounting result using booked Ledger expenses (including booked Ads).",
+  books_gross_margin:
+    "Official Books gross margin using Ledger net revenue and all official COGS, including Gift/PR COGS.",
   meta_roas: "Purchase value attributed by Meta divided by Meta spend.",
   blended_mer:
     "Recognized business revenue divided by Meta spend; not attributed ROAS.",
@@ -173,6 +175,10 @@ const TIPS = {
     "Shopify net revenue minus Shopify COGS minus date-aligned Meta spend. Shared operating expenses are not allocated. Not Meta-attributed profit. Refunds do not automatically reverse COGS.",
   shopify_net_revenue:
     "Shopify net revenue is recognized Shopify revenue after Ledger refunds. COGS is Ledger-driven; refunds do not automatically reverse COGS unless corresponding accounting entries exist.",
+  paid_sales_total:
+    "Paid sales economics exclude Gift/PR COGS. Official Books gross margin, which includes Gift/PR COGS, is shown in Profitability.",
+  paid_sales_gm:
+    "Paid Sales GM uses recognized paid-channel net revenue and paid-channel COGS (excludes Gift/PR). Books GM includes all official Ledger COGS.",
   recognized_order:
     "An order satisfying the Books recognition rules.",
   open_pipeline:
