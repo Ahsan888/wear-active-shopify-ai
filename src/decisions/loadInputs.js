@@ -40,9 +40,10 @@ async function fetchMetaBundle(since, until) {
     return (payload.data || []).map(enrichInsightRow);
   }
 
-  const [accountRows, campaigns, ads] = await Promise.all([
+  const [accountRows, campaigns, adsets, ads] = await Promise.all([
     level("account"),
     level("campaign"),
+    level("adset"),
     level("ad"),
   ]);
 
@@ -65,6 +66,7 @@ async function fetchMetaBundle(since, until) {
     },
     totals,
     campaigns,
+    adsets,
     ads,
   };
 }
@@ -92,7 +94,7 @@ async function loadDecisionInputs(since, until) {
     since,
     until
   );
-  aggregateOpenPipeline(live.data, live.header);
+  const pipeline = aggregateOpenPipeline(live.data, live.header);
 
   const meta_spend = meta.totals.spend || 0;
   const bundle = buildProfitabilityBundle({
@@ -113,6 +115,9 @@ async function loadDecisionInputs(since, until) {
   });
 
   const warnings = [...recon.warnings];
+  if (ledgerAgg.sales_mix?.channel_cogs_coverage_warning) {
+    warnings.push(ledgerAgg.sales_mix.channel_cogs_coverage_warning);
+  }
   for (const msg of bundle.break_even_warnings || []) {
     warnings.push(buildWarning("break_even_note", "info", msg, {}));
   }
@@ -139,6 +144,14 @@ async function loadDecisionInputs(since, until) {
     uniqueWarnings.push(w);
   }
 
+  // Expense category rollup from Ledger rows (presentation only — no new categories)
+  const expense_by_category = {};
+  for (const row of ledgerAgg.expense_rows || []) {
+    const cat = String(row.category || "Other").trim() || "Other";
+    expense_by_category[cat] =
+      (expense_by_category[cat] || 0) + Number(row.debit || 0);
+  }
+
   return {
     date_range: {
       since,
@@ -156,9 +169,13 @@ async function loadDecisionInputs(since, until) {
       totals: meta.totals,
     },
     products: ledgerAgg.products,
+    gift_product_costs: ledgerAgg.gift_product_costs || [],
+    expense_by_category,
+    pipeline,
     warnings: uniqueWarnings,
     ad_reconciliation: recon.ad_reconciliation,
     campaigns: meta.campaigns,
+    adsets: meta.adsets || [],
     ads: meta.ads,
   };
 }

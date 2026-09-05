@@ -117,13 +117,16 @@ Local-only under the editor (gitignored): `input/`, `photos/`, `gpt_output/`,
 | `profitability:report` | Blended Meta + Books profitability (read-only) |
 | `decisions:report` | Decision intelligence advisory report (read-only) |
 | `decisions:test` | Pure-function tests for decision classifiers |
-| `decisions:dashboard` | Generate local HTML decision dashboard |
+| `reports:dashboard` | Unified HTML reporting & decision dashboard → `reports/dashboard/index.html` |
+| `decisions:dashboard` | Legacy path (same renderer → `reports/decisions/`) |
 | `dashboard:test` | Sales-mix + dashboard pure-function tests |
 | `profitability:test` | Pure-function tests for no-double-count / reconcile |
 
 Low-stock setup: [docs/LOW-STOCK-ALERTS.md](docs/LOW-STOCK-ALERTS.md).  
 Meta Ads setup: [docs/META_SETUP.md](docs/META_SETUP.md).  
-Profitability: [docs/PROFITABILITY_REPORTING.md](docs/PROFITABILITY_REPORTING.md).
+Profitability: [docs/PROFITABILITY_REPORTING.md](docs/PROFITABILITY_REPORTING.md).  
+Phase 3.5: [docs/PHASE_3_5_REPORTING.md](docs/PHASE_3_5_REPORTING.md).  
+Unified dashboard: [docs/UNIFIED_REPORTING_DASHBOARD.md](docs/UNIFIED_REPORTING_DASHBOARD.md).
 
 Some `package.json` script names refer to one-off catalog scripts that may not
 exist in every checkout; the books and client scripts above are the supported

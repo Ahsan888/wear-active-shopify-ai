@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Backward-compatible decision dashboard CLI.
- * Generates the unified reporting HTML into reports/decisions/ for legacy paths.
- *
- * Prefer: npm run reports:dashboard
+ * Generate the unified Wear Active Reporting & Decision Intelligence dashboard.
  *
  * Usage:
- *   npm run decisions:dashboard -- --days=7
- *   npm run decisions:dashboard -- --days=7 --open
+ *   npm run reports:dashboard -- --days=7
+ *   npm run reports:dashboard -- --since=2026-08-01 --until=2026-08-31
+ *   npm run reports:dashboard -- --days=7 --open
+ *
+ * Read-only — no Sheet writes, no Meta mutations.
  */
 const fs = require("fs");
 const path = require("path");
@@ -49,26 +49,26 @@ async function main() {
   const bundle = sanitizeBundleForEmbed(buildUnifiedReportingBundle(inputs));
   const html = renderUnifiedDashboard(bundle);
 
-  const outDir = path.join(process.cwd(), "reports", "decisions");
+  const outDir = path.join(process.cwd(), "reports", "dashboard");
   ensureDir(outDir);
-  const latestPath = path.join(outDir, "dashboard.html");
-  const datedName = `decision-${dateRange.since}-to-${dateRange.until}.html`;
+  const latestPath = path.join(outDir, "index.html");
+  const datedName = `report-${dateRange.since}-to-${dateRange.until}.html`;
   const datedPath = path.join(outDir, datedName);
 
   fs.writeFileSync(latestPath, html, "utf8");
   fs.writeFileSync(datedPath, html, "utf8");
 
-  console.log("Wear Active decision dashboard generated (unified renderer).");
+  console.log("Wear Active reporting dashboard generated.");
   console.log(`Period: ${dateRange.since} → ${dateRange.until}`);
   console.log(`Open: ${latestPath}`);
   console.log(`Also: ${datedPath}`);
-  console.log("Prefer: npm run reports:dashboard → reports/dashboard/index.html");
+  console.log("Advisory only — no Meta mutations, no Sheet writes.");
 
   maybeOpen(latestPath, Boolean(args.open));
 }
 
 main().catch((err) => {
-  console.error("Decision dashboard failed:", err.message || err);
+  console.error("Reporting dashboard failed:", err.message || err);
   const hint = hintForMetaError(err);
   if (hint) console.error(hint);
   process.exitCode = 1;

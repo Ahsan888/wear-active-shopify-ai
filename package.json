@@ -46,6 +46,7 @@
     "decisions:report": "node src/scripts/decision-report.js",
     "decisions:test": "node src/scripts/decision-self-test.js",
     "decisions:dashboard": "node src/scripts/decision-dashboard.js",
+    "reports:dashboard": "node src/scripts/reports-dashboard.js",
     "dashboard:test": "node src/scripts/dashboard-self-test.js",
     "sheets:info": "node src/scripts/sheets-info.js",
     "sheets:write": "node src/scripts/sheets-write.js",
