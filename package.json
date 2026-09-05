@@ -39,6 +39,7 @@
     "meta:check": "node src/scripts/meta-check.js",
     "meta:report": "node src/scripts/meta-report.js",
     "meta:report:full": "node src/scripts/meta-report-full.js",
+    "meta:test": "node src/scripts/meta-self-test.js",
     "reports:merge": "node src/scripts/merge-reports.js",
     "sheets:info": "node src/scripts/sheets-info.js",
     "sheets:write": "node src/scripts/sheets-write.js",

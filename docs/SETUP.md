@@ -71,12 +71,20 @@ Shopify Admin.
 
 ## 6. Meta Ads (optional)
 
-Only needed for Meta reporting scripts:
+Only needed for Meta reporting scripts. Full walkthrough:
+[META_SETUP.md](META_SETUP.md).
 
 ```bash
-META_ACCESS_TOKEN=...
-META_AD_ACCOUNT_ID=...
+META_ACCESS_TOKEN=...                    # system-user token with ads_read
+META_AD_ACCOUNT_ID=4074524202691358      # WA's Ad Account (act_ optional)
 META_API_VERSION=v21.0
+```
+
+Verify:
+
+```bash
+npm run meta:check
+npm run meta:report -- --days=7
 ```
 
 ## 7. Photo editor (optional)
