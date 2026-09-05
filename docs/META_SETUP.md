@@ -74,10 +74,34 @@ Generated files land under `reports/meta/` and `reports/merged/` (gitignored).
 - Purchases / purchase value prefer Meta action types in this order:
   `purchase` → `omni_purchase` → `offsite_conversion.fb_pixel_purchase`
   (first match only — **not** summed, to avoid double-counting).
+  The same first-match rule applies to ATC / checkout aliases.
+- `purchase_action_type` / `purchase_value_action_type` record which variant
+  was selected from `actions` vs `action_values`.
 - **ROAS** = purchase value ÷ spend (Meta-attributed).
 - **CPA** = spend ÷ purchases.
-- Campaign/adset **reach** summed across rows is an upper-bound proxy; account-level
-  reach from `meta:report:full` summary is preferred when uniqueness matters.
+- **`purchase_per_impression_pct`** = purchases ÷ impressions × 100.
+  This is **not** ecommerce site “purchase CVR”.
+- Funnel ratios (null when the denominator is missing/zero):
+  - `lpv_to_atc_pct` = ATC ÷ LPV × 100
+  - `lpv_to_checkout_pct` = checkouts ÷ LPV × 100
+  - `lpv_to_purchase_pct` = purchases ÷ LPV × 100
+  - `atc_to_checkout_pct` = checkouts ÷ ATC × 100
+  - `checkout_to_purchase_pct` = purchases ÷ checkouts × 100
+- Campaign/adset **reach** summed across rows is an upper-bound proxy;
+  `meta:report:full` `summary.json` → `totals` uses authoritative
+  **account-level** Insights (unique reach).
+
+### Full export ad counts
+
+`meta:report:full` joins date-range Insights with the full account ads catalog:
+
+| Count | Meaning |
+|---|---|
+| `ads_with_insights` | Ads returned by Insights for the selected range |
+| `ads_metadata` | Ads fetched from the account ads catalog |
+| `ads_total_exported` | Final joined/exported row count (may include 0-spend ads) |
+
+A large `ads_total_exported` does **not** mean that many ads delivered in-range.
 
 ## Attribution caveat (Meta vs Shopify vs Books)
 
@@ -85,13 +109,21 @@ Meta purchase counts are **not** Shopify order counts and **not** Books recogniz
 revenue. Different windows, filters, and recognition rules apply. Use
 `reports:merge` only as a container until a deliberate join design exists.
 
+## Pure-function tests
+
+```bash
+npm run meta:test
+```
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Meta **#200** | Token/system user lacks ads access on the configured account, or wrong `META_AD_ACCOUNT_ID` | Use `4074524202691358`; assign `wearactive-reports` in Business Manager |
 | Meta **#190** | Invalid/expired token | Issue a new long-lived system-user token |
-| Meta **#100** | Unsupported field/param for API version, or bad date | Check `META_API_VERSION`; simplify fields; verify `YYYY-MM-DD` |
+| Meta **#100** | Unsupported field/param for API version, or bad date | Check `META_API_VERSION`; simplify fields; verify real `YYYY-MM-DD` dates |
+| Invalid `--days` / unknown flag | CLI validation | Use `--days=7` (positive integer); known flags only |
+| Pagination exceeded maxPages | Safety guard against silent truncation | Rare for WA; raise `maxPages` only intentionally |
 | Empty insights | No delivery in range (or future dates) | Widen `--days` / `--since`–`--until` |
 | `meta:check` OK but report empty | Access works; no spend in window | Pick a range that had delivery |
 

@@ -112,6 +112,7 @@ Local-only under the editor (gitignored): `input/`, `photos/`, `gpt_output/`,
 | `meta:check` | Verify Meta Ads token + ad account insights |
 | `meta:report` | Campaign/adset/ad performance report (`--json` supported) |
 | `meta:report:full` | Export detailed Meta report files under `reports/meta/` |
+| `meta:test` | Pure-function tests for Meta metrics/CLI validation |
 | `reports:merge` | Conservative Meta (+ optional Shopify) merge stub |
 
 Low-stock setup: [docs/LOW-STOCK-ALERTS.md](docs/LOW-STOCK-ALERTS.md).  

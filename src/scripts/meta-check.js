@@ -9,7 +9,7 @@ const {
   getAdAccountId,
   META_API_VERSION,
 } = require("../meta/client");
-const { hintForMetaError } = require("../meta/cli");
+const { hintForMetaError, todayInTimezone, ymd } = require("../meta/cli");
 
 async function main() {
   const actId = getAdAccountId();
@@ -20,12 +20,8 @@ async function main() {
   });
   const account = accountRes.data;
 
-  // Lightweight insights probe: last 1 day (may be empty; access is what matters)
-  const today = new Date();
-  const y = today.getFullYear();
-  const m = String(today.getMonth() + 1).padStart(2, "0");
-  const d = String(today.getDate()).padStart(2, "0");
-  const day = `${y}-${m}-${d}`;
+  // Lightweight insights probe: account-timezone "today" (empty is OK)
+  const day = ymd(todayInTimezone(account.timezone_name));
 
   let insightsOk = false;
   let insightsNote = "";

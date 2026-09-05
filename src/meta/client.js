@@ -169,6 +169,15 @@ async function graphGetAll(path, params = {}, options = {}) {
     pages += 1;
   }
 
+  // Do not return a silently truncated report (and never log paging.next —
+  // it may embed the access token).
+  if (next) {
+    const label = path ? String(path) : "(absolute paging URL)";
+    throw new Error(
+      `Meta pagination exceeded maxPages=${maxPages}; refusing to return a potentially incomplete report (path=${label}, pages=${pages})`
+    );
+  }
+
   return { data: rows, paging: { pages } };
 }
 

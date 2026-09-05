@@ -39,6 +39,12 @@ function safeDiv(numerator, denominator) {
   return n / d;
 }
 
+/** Ratio as a percentage, or null when denominator is missing/zero. */
+function pctRatio(numerator, denominator) {
+  const r = safeDiv(numerator, denominator);
+  return r == null ? null : r * 100;
+}
+
 /**
  * Find the first preferred action type present in a Meta action array.
  * Returns { action_type, value } or null.
@@ -80,6 +86,28 @@ function numFieldOrNull(row, key) {
 }
 
 /**
+ * Derived funnel / rate fields from absolute counts.
+ * Not ecommerce site CVR — Meta insight ratios only.
+ */
+function deriveRateFields({
+  impressions,
+  purchases,
+  landing_page_views: lpv,
+  add_to_carts: atc,
+  initiated_checkouts: checkouts,
+}) {
+  return {
+    // Purchases per impression (NOT site purchase CVR)
+    purchase_per_impression_pct: pctRatio(purchases, impressions),
+    lpv_to_atc_pct: pctRatio(atc, lpv),
+    lpv_to_checkout_pct: pctRatio(checkouts, lpv),
+    lpv_to_purchase_pct: pctRatio(purchases, lpv),
+    atc_to_checkout_pct: pctRatio(checkouts, atc),
+    checkout_to_purchase_pct: pctRatio(purchases, checkouts),
+  };
+}
+
+/**
  * Normalize one Insights row into Wear Active KPIs.
  * Does not invent attribution — only derives ratios from returned fields.
  */
@@ -90,13 +118,14 @@ function enrichInsightRow(row = {}) {
   const clicks = numField(row, "clicks", 0);
   const linkClicks = numFieldOrNull(row, "inline_link_clicks");
 
-  const purchases = actionValue(row.actions, PURCHASE_TYPES);
-  const purchaseValue = actionValue(row.action_values, PURCHASE_TYPES);
+  const purchasePick = pickAction(row.actions, PURCHASE_TYPES);
+  const purchaseValuePick = pickAction(row.action_values, PURCHASE_TYPES);
+  const purchases = purchasePick ? purchasePick.value : 0;
+  const purchaseValue = purchaseValuePick ? purchaseValuePick.value : 0;
   const addToCarts = actionValue(row.actions, ATC_TYPES);
   const checkouts = actionValue(row.actions, CHECKOUT_TYPES);
   const landingPageViews = actionValue(row.actions, LPV_TYPES);
 
-  const purchasePick = pickAction(row.actions, PURCHASE_TYPES);
   const cpaFromMeta = actionValueOrNull(
     row.cost_per_action_type,
     PURCHASE_TYPES
@@ -116,8 +145,6 @@ function enrichInsightRow(row = {}) {
 
   const cpa = purchases > 0 ? spend / purchases : cpaFromMeta;
   const roas = spend > 0 ? purchaseValue / spend : null;
-  const purchaseCvr =
-    impressions > 0 ? (purchases / impressions) * 100 : null;
 
   return {
     campaign_id: row.campaign_id || null,
@@ -140,12 +167,19 @@ function enrichInsightRow(row = {}) {
     purchases,
     purchase_value: purchaseValue,
     purchase_action_type: purchasePick?.action_type || null,
+    purchase_value_action_type: purchaseValuePick?.action_type || null,
     cpa,
     roas,
     add_to_carts: addToCarts,
     initiated_checkouts: checkouts,
     landing_page_views: landingPageViews,
-    purchase_cvr_pct: purchaseCvr,
+    ...deriveRateFields({
+      impressions,
+      purchases,
+      landing_page_views: landingPageViews,
+      add_to_carts: addToCarts,
+      initiated_checkouts: checkouts,
+    }),
   };
 }
 
@@ -186,10 +220,6 @@ function sumRows(rows) {
   const cpc = blank.clicks > 0 ? blank.spend / blank.clicks : null;
   const cpa = blank.purchases > 0 ? blank.spend / blank.purchases : null;
   const roas = blank.spend > 0 ? blank.purchase_value / blank.spend : null;
-  const purchaseCvr =
-    blank.impressions > 0
-      ? (blank.purchases / blank.impressions) * 100
-      : null;
 
   return {
     ...blank,
@@ -199,7 +229,7 @@ function sumRows(rows) {
     cpc,
     cpa,
     roas,
-    purchase_cvr_pct: purchaseCvr,
+    ...deriveRateFields(blank),
     note:
       "Aggregated reach is summed across rows (not de-duplicated). Prefer account-level reach when exact unique reach is required.",
   };
@@ -247,8 +277,10 @@ module.exports = {
   LPV_TYPES,
   toNumber,
   safeDiv,
+  pctRatio,
   pickAction,
   actionValue,
+  deriveRateFields,
   enrichInsightRow,
   sumRows,
   formatMoney,

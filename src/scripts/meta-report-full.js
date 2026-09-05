@@ -121,12 +121,18 @@ function insightCsvColumns(level) {
     "purchases",
     "purchase_value",
     "purchase_action_type",
+    "purchase_value_action_type",
     "cpa",
     "roas",
     "add_to_carts",
     "initiated_checkouts",
     "landing_page_views",
-    "purchase_cvr_pct",
+    "purchase_per_impression_pct",
+    "lpv_to_atc_pct",
+    "lpv_to_checkout_pct",
+    "lpv_to_purchase_pct",
+    "atc_to_checkout_pct",
+    "checkout_to_purchase_pct",
     "date_start",
     "date_stop",
   ];
@@ -211,8 +217,12 @@ async function main() {
     counts: {
       campaigns: campaigns.length,
       adsets: adsets.length,
+      // ads_with_insights = Insights rows for the selected date range
       ads_with_insights: adsInsights.length,
+      // ads_metadata = ads fetched from the account ads catalog (all ads)
       ads_metadata: adsMeta.length,
+      // ads_total_exported = joined export rows (insights ∪ metadata; may include 0-spend ads)
+      ads_total_exported: adsJoined.length,
     },
     files: {
       summary: "summary.json",
@@ -309,7 +319,9 @@ async function main() {
     `  totals: spend=${accountTotals.spend} purchases=${accountTotals.purchases} roas=${accountTotals.roas}`
   );
   console.log(
-    `  rows: campaigns=${campaigns.length} adsets=${adsets.length} ads=${adsJoined.length}`
+    `  rows: campaigns=${campaigns.length} adsets=${adsets.length} ` +
+      `ads_with_insights=${adsInsights.length} ads_metadata=${adsMeta.length} ` +
+      `ads_total_exported=${adsJoined.length}`
   );
 }
 

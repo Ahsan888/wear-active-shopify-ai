@@ -1,6 +1,51 @@
 /**
  * Shared CLI date-range + insights field helpers for Meta report scripts.
  */
+
+const KNOWN_FLAGS = new Set([
+  "--json",
+  "--days",
+  "--since",
+  "--until",
+  "--level",
+  "--meta",
+  "--shopify",
+  "--out",
+]);
+
+function flagName(arg) {
+  const eq = arg.indexOf("=");
+  return eq === -1 ? arg : arg.slice(0, eq);
+}
+
+function isFlag(arg) {
+  return typeof arg === "string" && arg.startsWith("--");
+}
+
+function requireValue(flag, value) {
+  if (value == null || value === "" || isFlag(value)) {
+    throw new Error(`Missing value for ${flag}`);
+  }
+  return value;
+}
+
+/** Require a positive integer (rejects 0, negatives, NaN, negatives). */
+function parsePositiveInt(raw, flag) {
+  const text = String(raw);
+  if (!/^\d+$/.test(text)) {
+    throw new Error(
+      `Invalid ${flag}=${raw}; expected a positive integer (e.g. 7)`
+    );
+  }
+  const n = Number(text);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(
+      `Invalid ${flag}=${raw}; expected a positive integer (e.g. 7)`
+    );
+  }
+  return n;
+}
+
 function parseArgs(argv) {
   const out = {
     days: null,
@@ -15,21 +60,37 @@ function parseArgs(argv) {
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--json") out.json = true;
-    else if (arg.startsWith("--days=")) out.days = Number(arg.slice(7));
-    else if (arg === "--days") out.days = Number(argv[++i]);
-    else if (arg.startsWith("--since=")) out.since = arg.slice(8);
-    else if (arg === "--since") out.since = argv[++i];
-    else if (arg.startsWith("--until=")) out.until = arg.slice(8);
-    else if (arg === "--until") out.until = argv[++i];
-    else if (arg.startsWith("--level=")) out.level = arg.slice(8);
-    else if (arg === "--level") out.level = argv[++i];
-    else if (arg.startsWith("--meta=")) out.meta = arg.slice(7);
-    else if (arg === "--meta") out.meta = argv[++i];
-    else if (arg.startsWith("--shopify=")) out.shopify = arg.slice(10);
-    else if (arg === "--shopify") out.shopify = argv[++i];
-    else if (arg.startsWith("--out=")) out.out = arg.slice(6);
-    else if (arg === "--out") out.out = argv[++i];
+
+    if (!isFlag(arg)) {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+
+    const name = flagName(arg);
+    if (!KNOWN_FLAGS.has(name)) {
+      throw new Error(`Unknown argument: ${arg}`);
+    }
+
+    if (arg === "--json") {
+      out.json = true;
+      continue;
+    }
+
+    let value;
+    if (arg.includes("=")) {
+      value = arg.slice(arg.indexOf("=") + 1);
+      requireValue(name, value === "" ? null : value);
+    } else {
+      value = requireValue(name, argv[i + 1]);
+      i += 1;
+    }
+
+    if (name === "--days") out.days = parsePositiveInt(value, "--days");
+    else if (name === "--since") out.since = value;
+    else if (name === "--until") out.until = value;
+    else if (name === "--level") out.level = value;
+    else if (name === "--meta") out.meta = value;
+    else if (name === "--shopify") out.shopify = value;
+    else if (name === "--out") out.out = value;
   }
 
   return out;
@@ -42,29 +103,44 @@ function ymd(date) {
   return `${y}-${m}-${d}`;
 }
 
+/**
+ * Parse YYYY-MM-DD and reject non-existent calendar dates (e.g. 2026-02-31).
+ */
 function parseYmd(value) {
   const m = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) {
     throw new Error(`Invalid date "${value}" (expected YYYY-MM-DD)`);
   }
-  return { y: Number(m[1]), mo: Number(m[2]), d: Number(m[3]) };
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (
+    dt.getUTCFullYear() !== y ||
+    dt.getUTCMonth() !== mo - 1 ||
+    dt.getUTCDate() !== d
+  ) {
+    throw new Error(`Invalid calendar date "${value}"`);
+  }
+  return { y, mo, d };
 }
 
 /**
- * Resolve since/until. Default: last N calendar days inclusive ending today (local).
+ * Resolve since/until. Default: last N calendar days inclusive ending today.
  * Prefer account timezone date "today" when timezone_name is provided.
  */
 function resolveDateRange(args, timezoneName) {
   let until = args.until || null;
   let since = args.since || null;
-  const days = args.days != null && Number.isFinite(args.days) ? args.days : null;
+  const days = args.days;
 
   if ((since && !until) || (!since && until)) {
     throw new Error("Provide both --since and --until, or use --days=N");
   }
 
   if (!since && !until) {
-    const n = days != null ? Math.max(1, Math.floor(days)) : 7;
+    // days already validated as positive int when provided; default 7
+    const n = days != null ? days : 7;
     const end = todayInTimezone(timezoneName);
     const start = new Date(end);
     start.setDate(start.getDate() - (n - 1));
@@ -175,9 +251,12 @@ function hintForMetaError(err) {
 
 module.exports = {
   parseArgs,
+  parsePositiveInt,
+  parseYmd,
   resolveDateRange,
   normalizeLevel,
   insightFieldsForLevel,
   hintForMetaError,
+  todayInTimezone,
   ymd,
 };
