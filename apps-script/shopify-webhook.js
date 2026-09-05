@@ -145,6 +145,18 @@ function handleShopifyOrderUpsert_(order, topic) {
     set("Posted", "N");
     set("Order Tags", tagStr);
 
+    // Phase 5A — attribution metadata only (does not affect recognition/tax)
+    const attr = extractAttributionFromOrder_(order);
+    set("Attribution Status", attr.attribution_status);
+    set("First Touch Source", attr.first_source);
+    set("First Touch Campaign", attr.first_campaign);
+    set("First Touch Content", attr.first_content);
+    set("Last Touch Source", attr.last_source);
+    set("Last Touch Campaign", attr.last_campaign);
+    set("Last Touch Content", attr.last_content);
+    set("Meta Click ID Present", attr.meta_click);
+    set("Attribution Version", attr.attribution_version);
+
     const existingRow = existing.get(lineUid);
     if (existingRow) {
       // preserve Posted if already Y
@@ -267,6 +279,47 @@ function getGatewayNote_(order) {
   return g.length ? g.join(", ") : "";
 }
 
+/** Phase 5A — parse cart/order note attributes into LIVE attribution columns. */
+function extractAttributionFromOrder_(order) {
+  const notes = {};
+  const list = order.note_attributes || [];
+  for (let i = 0; i < list.length; i++) {
+    const a = list[i];
+    if (a && a.name) notes[String(a.name)] = a.value;
+  }
+  let payload = null;
+  if (notes._wa_attr) {
+    try {
+      payload = JSON.parse(String(notes._wa_attr));
+    } catch (e) {
+      payload = null;
+    }
+  }
+  const first = (payload && payload.first_touch) || {};
+  const last = (payload && payload.last_touch) || {};
+  const hasClick = !!(
+    first.fbclid ||
+    first.fbc ||
+    last.fbclid ||
+    last.fbc ||
+    notes.wa_ft_fbclid
+  );
+  return {
+    attribution_status: notes.wa_attr_status || "",
+    first_source: first.source || notes.wa_ft_source || "",
+    first_campaign:
+      first.campaign || first.campaign_id || notes.wa_ft_campaign || "",
+    first_content: first.content || first.ad_id || notes.wa_ft_content || "",
+    last_source: last.source || notes.wa_lt_source || "",
+    last_campaign:
+      last.campaign || last.campaign_id || notes.wa_lt_campaign || "",
+    last_content: last.content || last.ad_id || notes.wa_lt_content || "",
+    meta_click: hasClick ? "Y" : "N",
+    attribution_version:
+      (payload && payload.version) || notes.wa_attr_version || "",
+  };
+}
+
 function ensureLiveHeaders_(sh) {
   const needed = [
     "Date",
@@ -299,6 +352,15 @@ function ensureLiveHeaders_(sh) {
     "Recognized",
     "Posted",
     "Order Tags",
+    "Attribution Status",
+    "First Touch Source",
+    "First Touch Campaign",
+    "First Touch Content",
+    "Last Touch Source",
+    "Last Touch Campaign",
+    "Last Touch Content",
+    "Meta Click ID Present",
+    "Attribution Version",
   ];
   if (sh.getLastRow() < 1) {
     sh.getRange(1, 1, 1, needed.length).setValues([needed]);

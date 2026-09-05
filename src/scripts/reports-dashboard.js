@@ -47,6 +47,35 @@ async function main() {
   const dateRange = resolveDateRange(args, TIMEZONE);
   const inputs = await loadDecisionInputs(dateRange.since, dateRange.until);
   const bundle = sanitizeBundleForEmbed(buildUnifiedReportingBundle(inputs));
+
+  // Phase 5A — experimental attribution diagnostics (does not alter classifiers)
+  try {
+    const {
+      fetchOrdersForAttribution,
+    } = require("../attribution/fetchOrders");
+    const {
+      buildAttributionDiagnostics,
+    } = require("../attribution/coverage");
+    const orders = await fetchOrdersForAttribution({
+      since: dateRange.since,
+      until: dateRange.until,
+    });
+    bundle.attribution = buildAttributionDiagnostics(orders, {
+      metaEntities: {
+        campaigns: inputs.campaigns || [],
+        adsets: inputs.adsets || [],
+        ads: inputs.ads || [],
+      },
+    });
+    // Strip heavy per-order dump from embedded HTML
+    delete bundle.attribution.orders;
+  } catch (err) {
+    bundle.attribution = {
+      error: String(err.message || err),
+      experimental: true,
+    };
+  }
+
   const html = renderUnifiedDashboard(bundle);
 
   const outDir = path.join(process.cwd(), "reports", "dashboard");
