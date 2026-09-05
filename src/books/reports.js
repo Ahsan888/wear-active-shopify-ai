@@ -679,5 +679,5 @@ function buildAnalyticsValues(rollup, pipeline) {
 module.exports = {
   PNL_HEADERS, rollupLedger, buildDashboardValues, buildAnalyticsValues,
   buildChannelAnalyticsValues,
-  monthKey, orderKeyFromRef, periodSummary,
+  monthKey, orderKeyFromRef, saleUid, saleChannel, periodSummary,
 };

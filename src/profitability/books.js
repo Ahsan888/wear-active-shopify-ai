@@ -6,6 +6,14 @@ const { getValues } = require("../sheets/client");
 const { parseMoney, round2 } = require("../books/tax");
 const { orderKeyFromRef } = require("../books/reports");
 const { isRecognized } = require("../books/recognition");
+const {
+  emptyChannelAccumulators,
+  addSaleToChannelAcc,
+  addPaidCogsToChannelAcc,
+  addRefundToChannelAcc,
+  finalizeChannelAcc,
+  buildSalesMixSummary,
+} = require("./salesMix");
 
 /** Live primary Ads category (case-insensitive). */
 const ADS_CATEGORY = "ads";
@@ -203,6 +211,7 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
   let recognized_units = 0;
   let gift_units = 0;
   const orders = new Set();
+  const channelAcc = emptyChannelAccumulators();
   const products = {};
   const giftUnits = {};
   const giftProductCosts = {};
@@ -232,6 +241,15 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
       else if (ref) orders.add(ref);
       else orders.add(`ROW:${ymd}:${sku}:${credit}`);
 
+      addSaleToChannelAcc(channelAcc, {
+        source,
+        ref,
+        ymd,
+        sku,
+        credit,
+        qty,
+      });
+
       const bucket = ensureProductBucket(products, sku, description, catalogBySku);
       bucket.units += qty;
       bucket.revenue_ex_tax += credit;
@@ -257,6 +275,7 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
         giftProductCosts[key].cogs += debit;
         giftProductCosts[key].units += qty;
       } else {
+        addPaidCogsToChannelAcc(channelAcc, { source, ref, debit });
         const bucket = ensureProductBucket(products, sku, description, catalogBySku);
         bucket.cogs += debit;
       }
@@ -283,7 +302,14 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
         other_non_ad_opex += debit;
       }
     } else if (type === "refund" || /refund/i.test(type)) {
-      refunds += debit || credit;
+      const refundAmount = debit || credit;
+      refunds += refundAmount;
+      // Channel assignment reuses saleChannel(source, ref). Does not reverse COGS.
+      addRefundToChannelAcc(channelAcc, {
+        source,
+        ref,
+        amount: refundAmount,
+      });
     }
   }
 
@@ -315,6 +341,33 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
     cogs: round2(g.cogs),
     units: round2(g.units),
   }));
+
+  const sales_by_channel = finalizeChannelAcc(channelAcc);
+  const paid_cogs = round2(cogs - gift_cogs);
+  const sales_mix = buildSalesMixSummary(sales_by_channel, {
+    recognized_orders,
+    recognized_units,
+    revenue_ex_tax,
+    net_revenue_ex_tax,
+    refunds,
+    paid_cogs,
+  });
+
+  // Soft coverage check — do not alter Books totals
+  const channel_cogs_gap = round2(
+    paid_cogs - Number(sales_mix.channel_cogs_sum || 0)
+  );
+  if (Math.abs(channel_cogs_gap) > 1) {
+    sales_mix.channel_cogs_coverage_warning = {
+      code: "channel_cogs_coverage_gap",
+      severity: "info",
+      message:
+        `Paid Books COGS (${paid_cogs}) and summed channel COGS (${sales_mix.channel_cogs_sum}) differ by ${channel_cogs_gap}. Official Books totals unchanged.`,
+      paid_cogs,
+      channel_cogs_sum: sales_mix.channel_cogs_sum,
+      gap: channel_cogs_gap,
+    };
+  }
 
   return {
     books: {
@@ -348,7 +401,12 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
         recognized_orders > 0
           ? round2(net_revenue_ex_tax / recognized_orders)
           : null,
+      shopify_recognized_orders: sales_mix.shopify_recognized_orders,
+      manual_recognized_orders: sales_mix.manual_recognized_orders,
+      other_sales_recognized_orders: sales_mix.other_sales_recognized_orders,
     },
+    sales_by_channel,
+    sales_mix,
     products: productRows,
     gift_units_by_key: giftUnits,
     gift_product_costs,

@@ -117,6 +117,8 @@ Local-only under the editor (gitignored): `input/`, `photos/`, `gpt_output/`,
 | `profitability:report` | Blended Meta + Books profitability (read-only) |
 | `decisions:report` | Decision intelligence advisory report (read-only) |
 | `decisions:test` | Pure-function tests for decision classifiers |
+| `decisions:dashboard` | Generate local HTML decision dashboard |
+| `dashboard:test` | Sales-mix + dashboard pure-function tests |
 | `profitability:test` | Pure-function tests for no-double-count / reconcile |
 
 Low-stock setup: [docs/LOW-STOCK-ALERTS.md](docs/LOW-STOCK-ALERTS.md).  
