@@ -50,15 +50,17 @@ function classifyBusinessAdvertisingSafety({
 
   const base = {
     blended_ad_cost_per_recognized_order: blended,
+    business_wide_ad_load_per_recognized_order: blended,
     break_even_cpa: beCpa,
     business_cpa_headroom,
     business_cpa_headroom_pct,
     ad_spend_utilization_pct,
     meta_spend: round2(spend),
     recognized_orders: orders,
-    comparison_type: "blended_meta_spend_per_books_order_vs_break_even_cpa",
+    comparison_type:
+      "business_wide_ad_load_per_recognized_order_vs_break_even_cpa",
     note:
-      "Uses Books recognized-order denominator for both blended ad cost and break-even CPA. Not Meta attributed CPA.",
+      "Business-wide ad load = Meta spend ÷ all recognized Books orders (Shopify+Manual+Other Sales). Compared to business-wide break-even CPA. Not Meta attributed CPA. Shopify ad load is context only and does not drive this status.",
   };
 
   if (
@@ -103,8 +105,11 @@ function classifyBusinessAdvertisingSafety({
   return {
     status,
     reason_code,
-    reason: `Business CPA headroom ${h}% (blended ${blended} vs BE CPA ${beCpa})`,
+    reason: `Business CPA headroom ${h}% (business-wide ad load ${blended} vs BE CPA ${beCpa})`,
     ...base,
+    business_wide_ad_load_per_recognized_order: blended,
+    // Keep alias for older consumers
+    blended_ad_cost_per_recognized_order: blended,
   };
 }
 

@@ -4,6 +4,7 @@
 
 const KNOWN_FLAGS = new Set([
   "--json",
+  "--open",
   "--days",
   "--since",
   "--until",
@@ -53,6 +54,7 @@ function parseArgs(argv) {
     until: null,
     level: "campaign",
     json: false,
+    open: false,
     meta: null,
     shopify: null,
     out: null,
@@ -72,6 +74,10 @@ function parseArgs(argv) {
 
     if (arg === "--json") {
       out.json = true;
+      continue;
+    }
+    if (arg === "--open") {
+      out.open = true;
       continue;
     }
 

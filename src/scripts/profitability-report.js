@@ -137,6 +137,20 @@ function printHuman(report) {
   console.log(`  AOV (ex-tax):                 ${money(b.aov_ex_tax, cur)}`);
   console.log("");
 
+  const mix = report.sales_mix?.channels || [];
+  console.log("SALES MIX");
+  if (!mix.length) {
+    console.log("  (unavailable)");
+  } else {
+    for (const c of mix) {
+      const pad = (c.channel + ":").padEnd(14);
+      console.log(
+        `  ${pad}${c.orders} orders · ${money(c.revenue_ex_tax, cur)} revenue · ${formatPct(c.revenue_share_pct)}`
+      );
+    }
+  }
+  console.log("");
+
   console.log("META ADS (Marketing API — attributed)");
   console.log(`  Account: ${report.meta.account?.name} (${report.meta.account?.id})`);
   console.log(`  Spend:                        ${money(m.spend, cur)}`);
@@ -158,7 +172,14 @@ function printHuman(report) {
     `  Blended MER:                  ${blend.blended_mer == null ? "—" : `${Number(blend.blended_mer).toFixed(2)}x`}`
   );
   console.log(
-    `  Blended ad cost / recognized order: ${money(blend.blended_ad_cost_per_recognized_order, cur)}`
+    `  Business-wide ad load / order: ${money(blend.business_wide_ad_load_per_recognized_order ?? blend.blended_ad_cost_per_recognized_order, cur)}`
+  );
+  console.log(
+    `  Shopify ad load / order:       ${money(blend.shopify_ad_load_per_recognized_order, cur)}`
+  );
+  console.log(`  Business break-even CPA:       ${money(p.break_even_cpa, cur)}`);
+  console.log(
+    "  Note: Shopify ad load = Meta spend ÷ Shopify orders (context only; not CAC / not attributed)."
   );
   console.log("  No Meta→Shopify order attribution applied.");
   console.log("");
@@ -307,6 +328,8 @@ async function buildReport(dateRange) {
       is_full_calendar_month: fullMonth,
     },
     books: ledgerAgg.books,
+    sales_by_channel: ledgerAgg.sales_by_channel,
+    sales_mix: ledgerAgg.sales_mix,
     meta: {
       account: meta.account,
       totals: meta.totals,

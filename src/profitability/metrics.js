@@ -46,19 +46,33 @@ function computeBlended({
   net_revenue_ex_tax,
   meta_spend,
   recognized_orders,
+  shopify_recognized_orders,
   meta_roas,
 }) {
+  const { computeAdLoadMetrics } = require("./salesMix");
+  const adLoad = computeAdLoadMetrics({
+    meta_spend,
+    recognized_orders,
+    shopify_recognized_orders,
+  });
+
   return {
     blended_mer: safeDiv(net_revenue_ex_tax, meta_spend),
-    blended_ad_cost_per_recognized_order: safeDiv(
-      meta_spend,
-      recognized_orders
-    ),
+    // Alias kept for Phase 3 compatibility (= business-wide ad load)
+    blended_ad_cost_per_recognized_order:
+      adLoad.business_wide_ad_load_per_recognized_order,
+    business_wide_ad_load_per_recognized_order:
+      adLoad.business_wide_ad_load_per_recognized_order,
+    shopify_ad_load_per_recognized_order:
+      adLoad.shopify_ad_load_per_recognized_order,
+    shopify_recognized_orders: Number(shopify_recognized_orders || 0),
     meta_attributed_roas: meta_roas == null ? null : Number(meta_roas),
     no_order_level_attribution: true,
+    ad_load_notes: adLoad.notes,
     note:
       "blended_mer = Books net revenue / Meta spend. Not Meta-attributed ROAS. " +
-      "blended_ad_cost_per_recognized_order is not attributed CAC.",
+      "business_wide_ad_load_per_recognized_order = Meta spend / all recognized orders (not attributed CAC). " +
+      "shopify_ad_load_per_recognized_order = Meta spend / Shopify orders only (context, not CAC).",
   };
 }
 
@@ -120,6 +134,7 @@ function buildProfitabilityBundle({
     net_revenue_ex_tax: books.net_revenue_ex_tax,
     meta_spend,
     recognized_orders: books.recognized_orders,
+    shopify_recognized_orders: books.shopify_recognized_orders,
     meta_roas,
   });
   const be = computeBreakEven({
@@ -135,6 +150,16 @@ function buildProfitabilityBundle({
   if (blended.blended_ad_cost_per_recognized_order != null) {
     blended.blended_ad_cost_per_recognized_order = round2(
       blended.blended_ad_cost_per_recognized_order
+    );
+  }
+  if (blended.business_wide_ad_load_per_recognized_order != null) {
+    blended.business_wide_ad_load_per_recognized_order = round2(
+      blended.business_wide_ad_load_per_recognized_order
+    );
+  }
+  if (blended.shopify_ad_load_per_recognized_order != null) {
+    blended.shopify_ad_load_per_recognized_order = round2(
+      blended.shopify_ad_load_per_recognized_order
     );
   }
 

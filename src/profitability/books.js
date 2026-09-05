@@ -6,6 +6,12 @@ const { getValues } = require("../sheets/client");
 const { parseMoney, round2 } = require("../books/tax");
 const { orderKeyFromRef } = require("../books/reports");
 const { isRecognized } = require("../books/recognition");
+const {
+  emptyChannelAccumulators,
+  addSaleToChannelAcc,
+  finalizeChannelAcc,
+  buildSalesMixSummary,
+} = require("./salesMix");
 
 /** Live primary Ads category (case-insensitive). */
 const ADS_CATEGORY = "ads";
@@ -203,6 +209,7 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
   let recognized_units = 0;
   let gift_units = 0;
   const orders = new Set();
+  const channelAcc = emptyChannelAccumulators();
   const products = {};
   const giftUnits = {};
   const giftProductCosts = {};
@@ -231,6 +238,15 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
       if (orderKey) orders.add(orderKey);
       else if (ref) orders.add(ref);
       else orders.add(`ROW:${ymd}:${sku}:${credit}`);
+
+      addSaleToChannelAcc(channelAcc, {
+        source,
+        ref,
+        ymd,
+        sku,
+        credit,
+        qty,
+      });
 
       const bucket = ensureProductBucket(products, sku, description, catalogBySku);
       bucket.units += qty;
@@ -316,6 +332,13 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
     units: round2(g.units),
   }));
 
+  const sales_by_channel = finalizeChannelAcc(channelAcc);
+  const sales_mix = buildSalesMixSummary(sales_by_channel, {
+    recognized_orders,
+    recognized_units,
+    revenue_ex_tax,
+  });
+
   return {
     books: {
       gross_collected: round2(gross_collected),
@@ -348,7 +371,12 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
         recognized_orders > 0
           ? round2(net_revenue_ex_tax / recognized_orders)
           : null,
+      shopify_recognized_orders: sales_mix.shopify_recognized_orders,
+      manual_recognized_orders: sales_mix.manual_recognized_orders,
+      other_sales_recognized_orders: sales_mix.other_sales_recognized_orders,
     },
+    sales_by_channel,
+    sales_mix,
     products: productRows,
     gift_units_by_key: giftUnits,
     gift_product_costs,
