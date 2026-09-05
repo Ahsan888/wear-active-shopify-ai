@@ -154,6 +154,13 @@ function buildSalesMixSummary(
   const channel_cogs_sum = round2(
     channels.reduce((s, c) => s + Number(c.cogs || 0), 0)
   );
+  // Paid-channel aggregate (excludes gift/PR COGS by construction of channel COGS)
+  const paid_channel_cogs = channel_cogs_sum;
+  const paid_channel_gross_profit = round2(total_net - paid_channel_cogs);
+  const paid_channel_gross_margin_pct =
+    total_net > 0
+      ? round2((paid_channel_gross_profit / total_net) * 100)
+      : null;
 
   const withShares = channels.map((c) => {
     const gross_rev = Number(c.revenue_ex_tax || 0);
@@ -189,7 +196,11 @@ function buildSalesMixSummary(
       revenue_ex_tax: round2(total_gross),
       refunds: round2(total_refunds),
       net_revenue_ex_tax: round2(total_net),
+      // Backward-compatible: sum of paid channel COGS (excludes gift/PR)
       cogs: channel_cogs_sum,
+      paid_channel_cogs,
+      paid_channel_gross_profit,
+      paid_channel_gross_margin_pct,
     },
     channel_cogs_sum,
     paid_cogs: paid_cogs == null ? null : round2(Number(paid_cogs)),

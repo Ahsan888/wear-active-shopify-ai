@@ -1506,13 +1506,27 @@ test("scale candidate displays controlled-review language", () => {
       ],
     })
   );
-  assert.ok(html.includes("Controlled review candidate"));
+  assert.ok(html.includes("Controlled budget increase candidate"));
   assert.ok(html.includes("do not auto-scale"));
 });
 
 test("accounting variance appears", () => {
   const html = renderDecisionDashboard(fixtureReport());
-  assert.ok(html.includes("meta_vs_ledger_ads_variance") || html.includes("Meta − Ledger"));
+  assert.ok(html.includes("meta_vs_ledger_ads_variance") || html.includes("Meta − Ledger") || html.includes("Meta vs Ledger"));
+});
+
+test("tip spans render as HTML not escaped text", () => {
+  const html = renderDecisionDashboard(fixtureReport());
+  assert.ok(
+    html.includes('<span class="tip" title='),
+    "tip span should be real HTML"
+  );
+  assert.ok(
+    !html.includes("&lt;span class=&quot;tip&quot;"),
+    "tip span must not be HTML-escaped into visible text"
+  );
+  assert.ok(/Meta CPA\s*<span class="tip"/.test(html));
+  assert.ok(/Meta ROAS\s*<span class="tip"/.test(html));
 });
 
 test("HTML escapes entity/product names correctly", () => {
@@ -1542,8 +1556,8 @@ test("HTML escapes entity/product names correctly", () => {
 
 test("embedded JSON is valid / safely escaped", () => {
   const html = renderDecisionDashboard(fixtureReport());
-  const m = html.match(/<script type="application\/json" id="decision-data">([\s\S]*?)<\/script>/);
-  assert.ok(m);
+  const m = html.match(/<script type="application\/json" id="report-data">([\s\S]*?)<\/script>/);
+  assert.ok(m, "report-data embed expected");
   const decoded = m[1]
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
@@ -1555,6 +1569,544 @@ test("embedded JSON is valid / safely escaped", () => {
   assert.ok(parsed.sales_mix);
 });
 
-if (!process.exitCode) {
-  console.log("\nAll dashboard / sales-mix pure-function tests passed.");
+// ——— Unified dashboard coverage ———
+const {
+  buildUnifiedReportingBundle,
+  annotateEntityCpaEvidence,
+  sanitizeBundleForEmbed,
+} = require("../dashboard/bundle");
+const { renderUnifiedDashboard } = require("../dashboard/html");
+const { cpaEvidenceParts } = require("../dashboard/format");
+
+function unifiedFixture(overrides = {}) {
+  const base = fixtureReport({
+    books: {
+      ...fixtureReport().books,
+      gross_collected: 320000,
+      output_tax: 9000,
+      refunds: 0,
+      delivery_expense: 5000,
+      other_non_ad_opex: 8000,
+      total_opex: 22000,
+      books_net_profit: 60000,
+      books_net_margin_pct: 19,
+      ads_expense_booked: 9000,
+      recognized_units: 168,
+      aov_ex_tax: 10724,
+      gift_cogs: 0,
+      paid_cogs: 117000,
+      cogs: 117000,
+      gross_profit: 194000,
+    },
+    profitability: {
+      ...fixtureReport().profitability,
+      profit_before_ads: 69000,
+      pre_ad_profit_margin: 22,
+      break_even_roas: 3.5,
+      meta_spend_treatment:
+        "analytical_replacement_only_not_additional_expense",
+    },
+    expense_by_category: { Delivery: 5000, Ads: 9000, Rent: 3000 },
+    pipeline: {
+      open_pipeline_orders: 4,
+      open_pipeline_units: 6,
+      open_pipeline_gross: 12000,
+      pipeline_not_revenue: true,
+    },
+    campaigns: [
+      {
+        entity_type: "campaign",
+        entity_id: "c1",
+        entity_name: "Summer Campaign",
+        status: "healthy",
+        spend: 4000,
+        purchases: 4,
+        impressions: 10000,
+        meta_attributed_cpa: 1000,
+        meta_attributed_roas: 2,
+        entity_cpa_vs_account_ratio: 0.44,
+        spend_vs_account_cpa: 1.78,
+        has_funnel_warning: false,
+      },
+    ],
+    adsets: [
+      {
+        entity_type: "adset",
+        entity_id: "as1",
+        entity_name: "Broad Adset",
+        status: "watch",
+        spend: 2000,
+        purchases: 0,
+        impressions: 5000,
+        meta_attributed_cpa: null,
+        meta_attributed_roas: null,
+        entity_cpa_vs_account_ratio: null,
+        spend_vs_account_cpa: 0.89,
+        has_funnel_warning: false,
+      },
+    ],
+    ads: [
+      {
+        entity_type: "ad",
+        entity_id: "a1",
+        entity_name: "Purchase Ad",
+        status: "high_cpa",
+        spend: 4950,
+        purchases: 2,
+        impressions: 8000,
+        meta_attributed_cpa: 2475,
+        meta_attributed_roas: 1.1,
+        entity_cpa_vs_account_ratio: 1.44,
+        spend_vs_account_cpa: 2.89,
+        has_funnel_warning: false,
+      },
+      {
+        entity_type: "ad",
+        entity_id: "a2",
+        entity_name: "Zero Purchase Ad",
+        status: "spend_no_purchase",
+        spend: 2540,
+        purchases: 0,
+        impressions: 4000,
+        meta_attributed_cpa: null,
+        meta_attributed_roas: null,
+        entity_cpa_vs_account_ratio: null,
+        spend_vs_account_cpa: 1.13,
+        has_funnel_warning: true,
+      },
+      {
+        entity_type: "ad",
+        entity_id: "a3",
+        entity_name: "Scale Ad",
+        status: "scale_candidate",
+        spend: 5000,
+        purchases: 5,
+        impressions: 20000,
+        meta_attributed_cpa: 1000,
+        meta_attributed_roas: 2,
+        entity_cpa_vs_account_ratio: 0.58,
+        spend_vs_account_cpa: 2.91,
+        has_funnel_warning: false,
+      },
+    ],
+    no_order_level_attribution: true,
+  });
+  return { ...base, ...overrides };
 }
+
+test("unified views render", () => {
+  const html = renderUnifiedDashboard(unifiedFixture());
+  assert.ok(html.includes('id="view-overview"'));
+  assert.ok(html.includes('id="view-profitability"'));
+  assert.ok(html.includes('id="view-sales"') || html.includes("Sales"));
+  assert.ok(html.includes('id="view-products"'));
+  assert.ok(html.includes('id="view-advertising"'));
+  assert.ok(html.includes('id="view-decisions"'));
+  assert.ok(html.includes('id="view-data-quality"'));
+  assert.ok(html.includes('data-view="overview"'));
+  assert.ok(html.includes('data-view="profitability"'));
+  assert.ok(html.includes('data-view="data-quality"'));
+});
+
+test("Books net profit and Meta-adjusted profit displayed", () => {
+  const html = renderUnifiedDashboard(unifiedFixture());
+  assert.ok(html.includes("Books net profit") || html.includes("Books Net Profit"));
+  assert.ok(html.includes("Meta-adjusted"));
+  assert.ok(
+    /replaces booked Ads|not deducted twice|analytical/i.test(html)
+  );
+});
+
+test("reconciliation and channels and Shopify contribution render", () => {
+  const html = renderUnifiedDashboard(unifiedFixture());
+  assert.ok(/reconcil|Meta.*Ledger|Ledger.*Recurring/i.test(html));
+  assert.ok(html.includes("Shopify"));
+  assert.ok(html.includes("Manual"));
+  assert.ok(html.includes("Other Sales"));
+  assert.ok(html.includes("Contribution after Meta") || html.includes("contribution after Meta"));
+  assert.ok(/DATE-ALIGNED|NOT ATTRIBUTED/i.test(html));
+});
+
+test("revenue concentration warning renders", () => {
+  const html = renderUnifiedDashboard(
+    unifiedFixture({
+      revenue_concentration: {
+        dominant_channel: "Other Sales",
+        dominant_channel_revenue_share_pct: 79.4,
+        dominant_channel_orders: 1,
+        is_materially_concentrated: true,
+        non_shopify_distortion_risk: true,
+        warning:
+          "79.4% of recognized net revenue came from Other Sales.",
+        category: "business_context",
+      },
+    })
+  );
+  assert.ok(/Other Sales|79\.4|concentration|mix context/i.test(html));
+});
+
+test("missing Ledger COGS flagged; incomplete aggregate not hero GM", () => {
+  const html = renderUnifiedDashboard(
+    unifiedFixture({
+      product_groups: [
+        {
+          product: "FlexFlow",
+          status: "data_issue",
+          reason_code: "missing_ledger_cogs",
+          reason: "Missing Ledger COGS",
+          sku_count: 2,
+          revenue_ex_tax: 10000,
+          units: 4,
+          cogs: 0,
+          gross_profit: 10000,
+          incomplete_cogs_coverage: true,
+          gross_margin_pct: null,
+          aggregate_margin_note: "incomplete",
+          skus: [
+            {
+              sku: "WA-FF-1",
+              status: "data_issue",
+              reason_code: "missing_ledger_cogs",
+              revenue_ex_tax: 5000,
+              cogs: 0,
+              units: 2,
+              gross_profit: 5000,
+              gross_margin_pct: 100,
+            },
+          ],
+        },
+      ],
+    })
+  );
+  assert.ok(/missing_ledger_cogs|DATA ISSUE|incomplete/i.test(html));
+  assert.ok(!/>HERO</.test(html));
+});
+
+test("Meta account summary and funnel render", () => {
+  const html = renderUnifiedDashboard(unifiedFixture());
+  assert.ok(/Impressions|Landing|Add to Cart|Checkout|Purchase/i.test(html));
+  assert.ok(html.includes("Summer Campaign") || html.includes("campaign"));
+});
+
+test("purchasing entity CPA ratio = entity CPA / account CPA", () => {
+  const e = annotateEntityCpaEvidence({
+    purchases: 2,
+    meta_attributed_cpa: 2475,
+    entity_cpa_vs_account_ratio: 1.44,
+    spend_vs_account_cpa: 2.89,
+  });
+  const parts = cpaEvidenceParts(e);
+  assert.strictEqual(parts.cpa_available, true);
+  assert.strictEqual(parts.cpa, 2475);
+  assert.strictEqual(parts.ratio, 1.44);
+  assert.strictEqual(parts.ratio_label, "vs account CPA");
+  // Must NOT use spend/account CPA as the purchasing ratio
+  assert.notStrictEqual(parts.ratio, 2.89);
+});
+
+test("zero-purchase entity shows CPA unavailable + spend evidence label", () => {
+  const e = annotateEntityCpaEvidence({
+    purchases: 0,
+    meta_attributed_cpa: null,
+    entity_cpa_vs_account_ratio: null,
+    spend_vs_account_cpa: 1.13,
+  });
+  const parts = cpaEvidenceParts(e);
+  assert.strictEqual(parts.cpa_available, false);
+  assert.strictEqual(parts.cpa, null);
+  assert.strictEqual(parts.ratio, 1.13);
+  assert.strictEqual(parts.ratio_label, "Spend evidence vs account CPA");
+
+  const html = renderUnifiedDashboard(unifiedFixture());
+  assert.ok(html.includes("Spend evidence vs account CPA"));
+  assert.ok(html.includes("Zero Purchase Ad"));
+  assert.ok(html.includes("Purchase Ad"));
+});
+
+test("scale candidate wording remains controlled", () => {
+  const html = renderUnifiedDashboard(unifiedFixture());
+  assert.ok(html.includes("Controlled budget increase candidate"));
+  assert.ok(/do not auto-scale/i.test(html));
+  assert.ok(!/guaranteed winner|automatically scale|profitable ad/i.test(html));
+});
+
+test("no product Meta ROAS claim", () => {
+  const html = renderUnifiedDashboard(unifiedFixture());
+  // Disclaimer wording is OK; do not claim product ROAS as a metric table
+  assert.ok(
+    /no product Meta ROAS|Books only|not product[- ]level/i.test(html) ||
+      !/Product Meta ROAS\s*Rs/i.test(html)
+  );
+  assert.ok(!/product Meta ROAS\s*[:=]/i.test(html));
+});
+
+test("attribution unavailable, pipeline, confidence, print button", () => {
+  const html = renderUnifiedDashboard(unifiedFixture());
+  assert.ok(/ORDER-LEVEL ATTRIBUTION|attribution.*UNAVAILABLE|No Meta→Shopify/i.test(html));
+  assert.ok(/Open pipeline|open_pipeline|not recognized revenue/i.test(html));
+  assert.ok(/Confidence|Business/i.test(html));
+  assert.ok(/Print|Save PDF|window\.print/i.test(html));
+  assert.ok(html.includes("<style>") && html.includes("<script>"));
+  assert.ok(!/cdn\.|unpkg|jsdelivr|googleapis\.com\/css/i.test(html));
+});
+
+test("embedded JSON escapes script end and rejects secrets", () => {
+  const html = renderUnifiedDashboard(
+    unifiedFixture({ evil: "</script><script>alert(1)</script>" })
+  );
+  const m = html.match(
+    /<script type="application\/json" id="report-data">([\s\S]*?)<\/script>/
+  );
+  assert.ok(m);
+  assert.ok(!m[1].includes("</script>"));
+  assert.ok(m[1].includes("&lt;/script&gt;") || m[1].includes("&lt;"));
+  const bundle = sanitizeBundleForEmbed(buildUnifiedReportingBundle({
+    date_range: { since: "2026-08-01", until: "2026-08-07", is_full_calendar_month: false },
+    books: { net_revenue_ex_tax: 1000, recognized_orders: 5, gross_margin_pct: 30 },
+    profitability: { meta_adjusted_profit: 100, meta_adjusted_margin_pct: 10, break_even_cpa: 200, break_even_ad_spend: 1000 },
+    blended: { business_wide_ad_load_per_recognized_order: 50 },
+    meta: { account: { currency: "PKR" }, totals: { spend: 100, purchases: 1, cpa: 100, roas: 1 } },
+    products: [],
+    warnings: [],
+    campaigns: [],
+    ads: [],
+    adsets: [],
+  }));
+  assert.ok(bundle.safety.no_sheet_writes);
+  assert.throws(() =>
+    sanitizeBundleForEmbed({ access_token: "EAAABCDEFG1234567890" })
+  );
+});
+
+test("bundle does not mutate inputs / presentation only", () => {
+  const inputs = {
+    date_range: { since: "2026-08-01", until: "2026-08-07", is_full_calendar_month: false },
+    books: {
+      net_revenue_ex_tax: 100000,
+      revenue_ex_tax: 100000,
+      gross_margin_pct: 30,
+      recognized_orders: 20,
+      books_net_profit: 15000,
+      ads_expense_booked: 5000,
+    },
+    profitability: {
+      meta_adjusted_profit: 20000,
+      meta_adjusted_margin_pct: 20,
+      break_even_cpa: 2000,
+      break_even_ad_spend: 40000,
+      profit_before_ads: 20000,
+    },
+    blended: {
+      business_wide_ad_load_per_recognized_order: 500,
+      shopify_ad_load_per_recognized_order: 800,
+    },
+    sales_by_channel: {
+      Shopify: { orders: 10, units: 10, revenue_ex_tax: 50000, refunds: 0, net_revenue_ex_tax: 50000, cogs: 20000, gross_profit: 30000, gross_margin_pct: 60 },
+      Manual: { orders: 5, units: 5, revenue_ex_tax: 30000, refunds: 0, net_revenue_ex_tax: 30000, cogs: 10000, gross_profit: 20000, gross_margin_pct: 66 },
+      "Other Sales": { orders: 5, units: 5, revenue_ex_tax: 20000, refunds: 0, net_revenue_ex_tax: 20000, cogs: 5000, gross_profit: 15000, gross_margin_pct: 75 },
+    },
+    meta: { account: { currency: "PKR" }, totals: { spend: 10000, purchases: 4, cpa: 2500, roas: 1.2, impressions: 1, ctr: 1 } },
+    products: [],
+    warnings: [],
+    campaigns: [],
+    ads: [],
+    adsets: [],
+    pipeline: { open_pipeline_orders: 1, open_pipeline_gross: 100, open_pipeline_units: 1 },
+  };
+  const before = JSON.stringify(inputs.books);
+  const bundle = buildUnifiedReportingBundle(inputs);
+  assert.strictEqual(JSON.stringify(inputs.books), before);
+  assert.strictEqual(bundle.safety.presentation_only, true);
+  assert.strictEqual(bundle.safety.no_meta_mutations, true);
+});
+
+test("paid-channel COGS/GP/GM from salesMix (excludes gift)", () => {
+  const rows = [
+    ["2026-08-01", "Sale", "Shopify", "", "Tee", "S1", "1", "", "1000", "", "", "SALE:SHOPIFY|#1:a", "", ""],
+    ["2026-08-01", "COGS", "Shopify", "", "COGS Tee", "S1", "1", "400", "", "", "", "COGS:SHOPIFY|#1:a", "", ""],
+    ["2026-08-01", "Sale", "Manual", "", "Tee", "S1", "1", "", "2000", "", "", "SALE:MANUAL:1", "", ""],
+    ["2026-08-01", "COGS", "Manual", "", "COGS Tee", "S1", "1", "700", "", "", "", "COGS:MANUAL:1", "", ""],
+    ["2026-08-01", "Sale", "Other Sales", "", "Bulk", "S1", "1", "", "3000", "", "", "SALE:OTHER:1", "", ""],
+    ["2026-08-01", "COGS", "Other Sales", "", "COGS Bulk", "S1", "1", "1000", "", "", "", "COGS:OTHER:1", "", ""],
+    ["2026-08-01", "Gift", "Shopify", "", "Gift", "S1", "1", "", "0", "", "", "GIFT:SHOPIFY|#9:a", "", ""],
+    ["2026-08-01", "COGS", "Shopify", "", "COGS Gift", "S1", "1", "350", "", "", "", "COGS:SHOPIFY|#9:a", "", ""],
+  ];
+  const agg = aggregateLedgerPeriod(rows, ledgerHeader, "2026-08-01", "2026-08-31", {});
+  const t = agg.sales_mix.totals;
+  assert.strictEqual(t.paid_channel_cogs, 2100);
+  assert.strictEqual(t.cogs, 2100); // BC alias = paid channel sum
+  assert.strictEqual(agg.books.gift_cogs, 350);
+  assert.strictEqual(agg.books.cogs, 2450);
+  assert.strictEqual(t.net_revenue_ex_tax, 6000);
+  assert.strictEqual(t.paid_channel_gross_profit, 3900);
+  assert.strictEqual(t.paid_channel_gross_margin_pct, 65);
+  assert.strictEqual(agg.sales_mix.cogs_reconciliation.status, "reconciled");
+  assert.strictEqual(agg.sales_mix.cogs_reconciliation.gift_cogs, 350);
+  // Gift COGS lowers Books GM vs paid-channel GM
+  assert.ok(agg.books.gross_margin_pct < t.paid_channel_gross_margin_pct);
+});
+
+test("refunds reduce paid-channel net before GP/GM; zero net → GM null", () => {
+  const rows = [
+    ["2026-08-01", "Sale", "Shopify", "", "Tee", "S1", "1", "", "1000", "", "", "SALE:SHOPIFY|#1:a", "", ""],
+    ["2026-08-01", "COGS", "Shopify", "", "COGS Tee", "S1", "1", "400", "", "", "", "COGS:SHOPIFY|#1:a", "", ""],
+    ["2026-08-02", "Refund", "Shopify", "", "Refund", "S1", "1", "1000", "", "", "", "REFUND:SHOPIFY|#1:a", "", ""],
+  ];
+  const agg = aggregateLedgerPeriod(rows, ledgerHeader, "2026-08-01", "2026-08-31", {});
+  assert.strictEqual(agg.sales_mix.totals.net_revenue_ex_tax, 0);
+  assert.strictEqual(agg.sales_mix.totals.paid_channel_gross_profit, -400);
+  assert.strictEqual(agg.sales_mix.totals.paid_channel_gross_margin_pct, null);
+});
+
+test("Sales HTML renders Paid Sales Total GM from upstream totals", () => {
+  const mix = buildSalesMixSummary(
+    {
+      Shopify: {
+        orders: 3,
+        units: 3,
+        revenue_ex_tax: 7153,
+        refunds: 0,
+        net_revenue_ex_tax: 7153,
+        cogs: 4773,
+        gross_profit: 2380,
+        gross_margin_pct: 33.27,
+      },
+      Manual: {
+        orders: 25,
+        units: 25,
+        revenue_ex_tax: 56900,
+        refunds: 0,
+        net_revenue_ex_tax: 56900,
+        cogs: 20000,
+        gross_profit: 36900,
+        gross_margin_pct: 64.85,
+      },
+      "Other Sales": {
+        orders: 1,
+        units: 1,
+        revenue_ex_tax: 247000,
+        refunds: 0,
+        net_revenue_ex_tax: 247000,
+        cogs: 80000,
+        gross_profit: 167000,
+        gross_margin_pct: 67.61,
+      },
+    },
+    {
+      recognized_orders: 29,
+      recognized_units: 29,
+      revenue_ex_tax: 311053,
+      net_revenue_ex_tax: 311053,
+      refunds: 0,
+      paid_cogs: 104773,
+    }
+  );
+  assert.ok(mix.totals.paid_channel_gross_margin_pct != null);
+  const html = renderUnifiedDashboard(
+    unifiedFixture({
+      sales_by_channel: mix.sales_by_channel,
+      sales_mix: mix,
+      books: {
+        ...unifiedFixture().books,
+        gross_margin_pct: 29.87,
+        cogs: 105123,
+        gift_cogs: 350,
+        net_revenue_ex_tax: 311053,
+      },
+    })
+  );
+  assert.ok(html.includes("Paid Sales Total"));
+  assert.ok(html.includes("Gift/PR"));
+  assert.ok(html.includes("Paid Sales GM"));
+  assert.ok(html.includes("Books GM") || /Gross margin/i.test(html));
+  // Must show a numeric paid GM, not em dash alone in total row context
+  assert.ok(
+    html.includes(`${mix.totals.paid_channel_gross_margin_pct}%`) ||
+      html.includes(String(mix.totals.paid_channel_gross_margin_pct))
+  );
+  // Renderer must not invent gross_margin_pct on totals
+  assert.strictEqual(mix.totals.gross_margin_pct, undefined);
+});
+
+test("unified bundle passes paid_channel totals through", () => {
+  const mix = buildSalesMixSummary(
+    {
+      Shopify: {
+        orders: 1,
+        units: 1,
+        revenue_ex_tax: 1000,
+        refunds: 0,
+        net_revenue_ex_tax: 1000,
+        cogs: 400,
+        gross_profit: 600,
+        gross_margin_pct: 60,
+      },
+      Manual: {
+        orders: 0,
+        units: 0,
+        revenue_ex_tax: 0,
+        refunds: 0,
+        net_revenue_ex_tax: 0,
+        cogs: 0,
+        gross_profit: 0,
+        gross_margin_pct: null,
+      },
+      "Other Sales": {
+        orders: 0,
+        units: 0,
+        revenue_ex_tax: 0,
+        refunds: 0,
+        net_revenue_ex_tax: 0,
+        cogs: 0,
+        gross_profit: 0,
+        gross_margin_pct: null,
+      },
+    },
+    { revenue_ex_tax: 1000, net_revenue_ex_tax: 1000, refunds: 0, recognized_orders: 1 }
+  );
+  const bundle = buildUnifiedReportingBundle({
+    date_range: {
+      since: "2026-08-01",
+      until: "2026-08-07",
+      is_full_calendar_month: false,
+    },
+    books: {
+      net_revenue_ex_tax: 1000,
+      revenue_ex_tax: 1000,
+      gross_margin_pct: 50,
+      recognized_orders: 1,
+      cogs: 500,
+      gift_cogs: 100,
+    },
+    profitability: {
+      meta_adjusted_profit: 100,
+      meta_adjusted_margin_pct: 10,
+      break_even_cpa: 200,
+      break_even_ad_spend: 200,
+      profit_before_ads: 200,
+    },
+    blended: { business_wide_ad_load_per_recognized_order: 50 },
+    sales_by_channel: mix.sales_by_channel,
+    sales_mix: mix,
+    meta: {
+      account: { currency: "PKR" },
+      totals: { spend: 50, purchases: 1, cpa: 50, roas: 1 },
+    },
+    products: [],
+    warnings: [],
+    campaigns: [],
+    ads: [],
+    adsets: [],
+  });
+  assert.strictEqual(
+    bundle.sales_mix.totals.paid_channel_gross_margin_pct,
+    60
+  );
+  assert.strictEqual(bundle.sales_mix.totals.paid_channel_cogs, 400);
+});
+
+if (!process.exitCode) {
+  console.log("\nAll dashboard / sales-mix / unified reporting tests passed.");
+}
+
+
