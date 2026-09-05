@@ -118,15 +118,27 @@ Local-only under the editor (gitignored): `input/`, `photos/`, `gpt_output/`,
 | `decisions:report` | Decision intelligence advisory report (read-only) |
 | `decisions:test` | Pure-function tests for decision classifiers |
 | `reports:dashboard` | Unified HTML reporting & decision dashboard → `reports/dashboard/index.html` |
+| `reports:daily` | Daily operational package (dashboard + snapshot + brief + alerts; delivery off by default) |
+| `reports:backfill` | Backfill daily snapshots for a date range (no delivery by default) |
+| `operations:test` | Phase 4 snapshot/history/trends/alerts/delivery self-tests |
 | `decisions:dashboard` | Legacy path (same renderer → `reports/decisions/`) |
 | `dashboard:test` | Sales-mix + dashboard pure-function tests |
 | `profitability:test` | Pure-function tests for no-double-count / reconcile |
+
+Local daily generation (no email):
+
+```bash
+npm run reports:daily -- --days=7 --no-delivery
+```
+
+Production owner email is sent by **GitHub Actions + Resend** (same `RESEND_API_KEY` pattern as low-stock). Do not rely on local `.env` for scheduled delivery.
 
 Low-stock setup: [docs/LOW-STOCK-ALERTS.md](docs/LOW-STOCK-ALERTS.md).  
 Meta Ads setup: [docs/META_SETUP.md](docs/META_SETUP.md).  
 Profitability: [docs/PROFITABILITY_REPORTING.md](docs/PROFITABILITY_REPORTING.md).  
 Phase 3.5: [docs/PHASE_3_5_REPORTING.md](docs/PHASE_3_5_REPORTING.md).  
-Unified dashboard: [docs/UNIFIED_REPORTING_DASHBOARD.md](docs/UNIFIED_REPORTING_DASHBOARD.md).
+Unified dashboard: [docs/UNIFIED_REPORTING_DASHBOARD.md](docs/UNIFIED_REPORTING_DASHBOARD.md).  
+Phase 4 daily ops: [docs/PHASE_4_OPERATIONAL_REPORTING.md](docs/PHASE_4_OPERATIONAL_REPORTING.md).
 
 Some `package.json` script names refer to one-off catalog scripts that may not
 exist in every checkout; the books and client scripts above are the supported

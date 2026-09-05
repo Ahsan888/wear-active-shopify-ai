@@ -172,23 +172,16 @@ function parseRecipients() {
 }
 
 async function sendViaResend({ to, from, subject, text, html }) {
+  const { sendViaResend: send } = require("../email/resend");
   const key = process.env.RESEND_API_KEY;
   if (!key) return false;
-
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ from, to, subject, text, html }),
-  });
-  const body = await res.text();
-  if (!res.ok) {
-    throw new Error(`Resend ${res.status}: ${body}`);
+  try {
+    const result = await send({ to, from, subject, text, html, apiKey: key });
+    console.log("Sent via Resend:", result.id || "ok");
+    return true;
+  } catch (err) {
+    throw new Error(err.messageRedacted || err.message || String(err));
   }
-  console.log("Sent via Resend:", body);
-  return true;
 }
 
 async function sendViaSmtp({ to, from, subject, text, html }) {
