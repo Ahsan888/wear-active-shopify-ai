@@ -260,7 +260,86 @@ test("gift rows do not add paid revenue", () => {
   const agg = aggregateLedgerPeriod(rows, header, "2026-08-01", "2026-08-31", {});
   assert.strictEqual(agg.books.revenue_ex_tax, 0);
   assert.strictEqual(agg.books.cogs, 400);
+  assert.strictEqual(agg.books.gift_cogs, 400);
+  assert.strictEqual(agg.books.recognized_units, 0);
+  assert.strictEqual(agg.books.gift_units, 1);
   assert.ok(agg.gift_units_by_key.SKU1 === 1 || Object.keys(agg.gift_units_by_key).length >= 1);
+});
+
+test("gift COGS excluded from paid product economics but kept in Books COGS", () => {
+  const header = [
+    "Date",
+    "Entry Type",
+    "Source",
+    "Category",
+    "Description",
+    "SKU",
+    "Qty",
+    "Debit",
+    "Credit",
+    "Owner",
+    "Partner Split",
+    "Ref Key",
+    "Notes",
+    "Created At",
+  ];
+  const rows = [
+    ["2026-08-10", "Sale", "Shopify", "", "Tee", "SKU1", "1", "", "1000", "", "", "SALE:SHOPIFY|#1:a", "", ""],
+    ["2026-08-10", "COGS", "Shopify", "", "COGS Tee", "SKU1", "1", "400", "", "", "", "COGS:SHOPIFY|#1:a", "", ""],
+    ["2026-08-11", "Gift", "Shopify", "", "Gift Tee", "SKU1", "1", "", "0", "", "", "GIFT:SHOPIFY|#9:a", "", ""],
+    ["2026-08-11", "COGS", "Shopify", "", "COGS Gift", "SKU1", "1", "400", "", "", "", "COGS:SHOPIFY|#9:a", "", ""],
+  ];
+  const agg = aggregateLedgerPeriod(rows, header, "2026-08-01", "2026-08-31", {
+    SKU1: { sku: "SKU1", product: "Tee", category: "Shirt", costPerItem: 400 },
+  });
+  assert.strictEqual(agg.books.cogs, 800);
+  assert.strictEqual(agg.books.gift_cogs, 400);
+  assert.strictEqual(agg.books.paid_cogs, 400);
+  assert.strictEqual(agg.books.gross_profit, 1000 - 800);
+  assert.strictEqual(agg.books.recognized_units, 1);
+  assert.strictEqual(agg.books.gift_units, 1);
+  assert.strictEqual(agg.products.length, 1);
+  assert.strictEqual(agg.products[0].revenue_ex_tax, 1000);
+  assert.strictEqual(agg.products[0].cogs, 400);
+  assert.strictEqual(agg.products[0].gross_profit, 600);
+  assert.strictEqual(agg.products[0].gross_margin_pct, 60);
+  assert.strictEqual(agg.gift_product_costs[0].cogs, 400);
+});
+
+test("LIVE sheet range and pipeline headers are loadable past column Z", () => {
+  const {
+    SHEET_RANGES,
+    LIVE_PIPELINE_HEADERS,
+    assertLivePipelineHeaders,
+    colIndex,
+  } = require("../profitability/books");
+  assert.ok(SHEET_RANGES.live.includes("A:AF"));
+  assert.ok(SHEET_RANGES.ledger.includes("A:N"));
+  assert.ok(SHEET_RANGES.recurring.includes("A:F"));
+  assert.ok(!/Z10000/.test(Object.values(SHEET_RANGES).join(" ")));
+
+  // Simulated A:AF header row (32 columns) — must include pipeline fields after Z
+  const header = [
+    "Date", "Order #", "SKU", "Product", "Variant", "Size", "Qty",
+    "Unit Price", "Unit Discount", "Net Unit", "Line Gross", "Line Discount",
+    "Shipping", "Tax", "Refunded", "Net Line", "Payment Status",
+    "Fulfillment Status", "Channel", "Source", "Notes", "Reserved", "line_uid",
+    "", "", "DeliveryMode", "TaxChargeable", "TaxAmount", "RevenueExTax",
+    "Recognized", "Posted", "Order Tags",
+  ];
+  assert.strictEqual(header.length, 32);
+  assert.ok(colIndex(header, "DeliveryMode") >= 25); // column Z
+  assert.ok(colIndex(header, "Recognized") > 25);
+  assert.ok(colIndex(header, "Posted") > 25);
+  assert.ok(colIndex(header, "Order Tags") > 25);
+  assertLivePipelineHeaders(header);
+  for (const name of LIVE_PIPELINE_HEADERS) {
+    assert.ok(colIndex(header, name) >= 0);
+  }
+  assert.throws(
+    () => assertLivePipelineHeaders(["Date", "Order #"]),
+    /missing required pipeline columns/
+  );
 });
 
 test("blended MER labeling helpers", () => {

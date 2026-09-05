@@ -131,7 +131,8 @@ function printHuman(report) {
   console.log(`  Books net profit:             ${money(b.books_net_profit, cur)}`);
   console.log(`  Books net margin:             ${formatPct(b.books_net_margin_pct)}`);
   console.log(
-    `  Recognized orders / units:    ${b.recognized_orders} / ${formatNumber(b.recognized_units, 0)}`
+    `  Recognized orders / paid units: ${b.recognized_orders} / ${formatNumber(b.recognized_units, 0)}` +
+      (b.gift_units ? `  (gift units ${formatNumber(b.gift_units, 0)})` : "")
   );
   console.log(`  AOV (ex-tax):                 ${money(b.aov_ex_tax, cur)}`);
   console.log("");
@@ -315,6 +316,8 @@ async function buildReport(dateRange) {
     ad_reconciliation: recon.ad_reconciliation,
     pipeline,
     products: ledgerAgg.products,
+    gift_product_costs: ledgerAgg.gift_product_costs,
+    gift_units_by_key: ledgerAgg.gift_units_by_key,
     data_quality: {
       warnings: uniqueWarnings,
     },

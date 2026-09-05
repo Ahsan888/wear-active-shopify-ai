@@ -70,9 +70,27 @@ the report **warns** but **does not** change `ads_expense_booked`.
 
 Official Books totals always reflect raw Ledger rows.
 
+## Sheet ranges (no truncation)
+
+Dedicated open-ended ranges (not `A1:Z10000`):
+
+| Sheet | Range |
+|---|---|
+| Ledger | `A:N` |
+| Recurring Expenses | `A:F` |
+| Variant Master | `A:U` |
+| Shopify Orders (LIVE) | `A:AF` (includes Recognized / Posted / Order Tags / DeliveryMode) |
+
 ## Product economics
 
 SKU revenue/COGS come from Ledger. Variant Master supplies labels / cost validation only.
+
+**Paid product table** excludes Gift/PR COGS linked via `GIFT:<uid>` / `COGS:<uid>`.
+Those costs remain in official Books total COGS / gross profit / net profit, and are
+exposed as `gift_cogs` / `gift_product_costs` diagnostics.
+
+`recognized_units` = **paid** Sale units only (aligned with recognized orders / AOV).
+Gift/PR units are `gift_units`, not mixed into paid units.
 
 Meta spend is **not** allocated to products. No product ROAS.
 

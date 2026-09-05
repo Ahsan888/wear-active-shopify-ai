@@ -73,21 +73,45 @@ function headerMap(rows) {
   return { header, data };
 }
 
-async function loadSheetRows(title) {
-  const rows = await getValues(`'${title}'!A1:Z10000`);
-  return headerMap(rows);
+/** Explicit open-ended ranges (no silent 10k-row / Z-column truncation). */
+const SHEET_RANGES = {
+  ledger: "'Ledger'!A:N",
+  recurring: "'Recurring Expenses'!A:F",
+  // Variant Master currently uses A–U (Product … Qty Restocked)
+  variantMaster: "'Variant Master'!A:U",
+  live: "'Shopify Orders (LIVE)'!A:AF",
+};
+
+const LIVE_PIPELINE_HEADERS = [
+  "Recognized",
+  "Posted",
+  "Order Tags",
+  "DeliveryMode",
+];
+
+function assertLivePipelineHeaders(header) {
+  const missing = LIVE_PIPELINE_HEADERS.filter(
+    (name) => colIndex(header, name) < 0
+  );
+  if (missing.length) {
+    throw new Error(
+      `Shopify Orders (LIVE) missing required pipeline columns: ${missing.join(", ")}. ` +
+        `Loaded ${header.length} headers (need A:AF).`
+    );
+  }
+  return true;
 }
 
 async function loadLedger() {
-  return loadSheetRows("Ledger");
+  return headerMap(await getValues(SHEET_RANGES.ledger));
 }
 
 async function loadRecurringExpenses() {
-  return loadSheetRows("Recurring Expenses");
+  return headerMap(await getValues(SHEET_RANGES.recurring));
 }
 
 async function loadVariantMaster() {
-  const { header, data } = await loadSheetRows("Variant Master");
+  const { header, data } = headerMap(await getValues(SHEET_RANGES.variantMaster));
   const iSku = colIndex(header, "SKU");
   const iProduct = colIndex(header, "Product");
   const iCat = colIndex(header, "Category");
@@ -107,11 +131,39 @@ async function loadVariantMaster() {
 }
 
 async function loadLiveOrders() {
-  return loadSheetRows("Shopify Orders (LIVE)");
+  const loaded = headerMap(await getValues(SHEET_RANGES.live));
+  assertLivePipelineHeaders(loaded.header);
+  return loaded;
+}
+
+/** Extract shared uid from GIFT:/COGS:/SALE: ref keys. */
+function ledgerUidFromRef(ref) {
+  const s = String(ref || "").trim();
+  const m = s.match(/^(?:GIFT|COGS|SALE):(.+)$/i);
+  return m ? m[1] : "";
+}
+
+function ensureProductBucket(products, sku, description, catalogBySku) {
+  const catalog = catalogBySku[sku] || {};
+  const key = sku || cleanProductName(description) || "Unknown";
+  if (!products[key]) {
+    products[key] = {
+      sku: sku || null,
+      product: catalog.product || cleanProductName(description) || key,
+      category: catalog.category || "",
+      units: 0,
+      revenue_ex_tax: 0,
+      cogs: 0,
+      vm_cost_per_item: catalog.costPerItem ?? null,
+      in_variant_master: Boolean(sku && catalog.sku),
+    };
+  }
+  return products[key];
 }
 
 /**
  * Aggregate Ledger for an inclusive [since, until] range with Ads isolated.
+ * Gift/PR COGS stay in Books totals but are excluded from paid product economics.
  */
 function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = {}) {
   const iDate = colIndex(header, "Date");
@@ -125,18 +177,35 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
   const iRef = colIndex(header, "Ref Key");
   const iSource = colIndex(header, "Source");
 
+  // Pass 1: gift UIDs in range (for linking COGS:uid → Gift/PR)
+  const giftUids = new Set();
+  for (const row of ledgerRows) {
+    const ymd = toYmd(row[iDate]);
+    if (!inRange(ymd, since, until)) continue;
+    const type = String(row[iType] || "").trim().toLowerCase();
+    const ref = String(row[iRef] || "").trim();
+    if (type === "gift") {
+      const uid = ledgerUidFromRef(ref);
+      if (uid) giftUids.add(uid);
+    }
+  }
+
   let revenue_ex_tax = 0;
   let refunds = 0;
   let output_tax = 0;
   let gross_collected = 0;
   let cogs = 0;
+  let gift_cogs = 0;
   let delivery_expense = 0;
   let ads_expense_booked = 0;
   let other_non_ad_opex = 0;
+  // Paid recognized sales units (aligned with recognized_orders / AOV)
   let recognized_units = 0;
+  let gift_units = 0;
   const orders = new Set();
   const products = {};
   const giftUnits = {};
+  const giftProductCosts = {};
   const expenseRows = [];
   const adsRows = [];
 
@@ -163,44 +232,36 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
       else if (ref) orders.add(ref);
       else orders.add(`ROW:${ymd}:${sku}:${credit}`);
 
-      const catalog = catalogBySku[sku] || {};
-      const key = sku || cleanProductName(description) || "Unknown";
-      if (!products[key]) {
-        products[key] = {
-          sku: sku || null,
-          product: catalog.product || cleanProductName(description) || key,
-          category: catalog.category || "",
-          units: 0,
-          revenue_ex_tax: 0,
-          cogs: 0,
-          vm_cost_per_item: catalog.costPerItem ?? null,
-          in_variant_master: Boolean(sku && catalog.sku),
-        };
-      }
-      products[key].units += qty;
-      products[key].revenue_ex_tax += credit;
+      const bucket = ensureProductBucket(products, sku, description, catalogBySku);
+      bucket.units += qty;
+      bucket.revenue_ex_tax += credit;
     } else if (type === "tax") {
       output_tax += credit;
       gross_collected += credit;
     } else if (type === "cogs") {
+      // Always in official Books COGS
       cogs += debit;
-      const catalog = catalogBySku[sku] || {};
-      const key = sku || cleanProductName(description) || "Unknown";
-      if (!products[key]) {
-        products[key] = {
-          sku: sku || null,
-          product: catalog.product || cleanProductName(description) || key,
-          category: catalog.category || "",
-          units: 0,
-          revenue_ex_tax: 0,
-          cogs: 0,
-          vm_cost_per_item: catalog.costPerItem ?? null,
-          in_variant_master: Boolean(sku && catalog.sku),
-        };
+      const uid = ledgerUidFromRef(ref);
+      const isGiftCogs = uid && giftUids.has(uid);
+      if (isGiftCogs) {
+        gift_cogs += debit;
+        const key = sku || cleanProductName(description) || "Gift";
+        if (!giftProductCosts[key]) {
+          giftProductCosts[key] = {
+            sku: sku || null,
+            product: cleanProductName(description) || key,
+            cogs: 0,
+            units: 0,
+          };
+        }
+        giftProductCosts[key].cogs += debit;
+        giftProductCosts[key].units += qty;
+      } else {
+        const bucket = ensureProductBucket(products, sku, description, catalogBySku);
+        bucket.cogs += debit;
       }
-      products[key].cogs += debit;
     } else if (type === "gift") {
-      recognized_units += qty;
+      gift_units += qty;
       const key = sku || cleanProductName(description) || "Gift";
       giftUnits[key] = (giftUnits[key] || 0) + qty;
     } else if (type === "expense") {
@@ -249,6 +310,12 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
     .filter((p) => p.revenue_ex_tax > 0 || p.cogs > 0)
     .sort((a, b) => b.revenue_ex_tax - a.revenue_ex_tax);
 
+  const gift_product_costs = Object.values(giftProductCosts).map((g) => ({
+    ...g,
+    cogs: round2(g.cogs),
+    units: round2(g.units),
+  }));
+
   return {
     books: {
       gross_collected: round2(gross_collected),
@@ -257,6 +324,8 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
       refunds: round2(refunds),
       net_revenue_ex_tax: round2(net_revenue_ex_tax),
       cogs: round2(cogs),
+      gift_cogs: round2(gift_cogs),
+      paid_cogs: round2(cogs - gift_cogs),
       gross_profit: round2(gross_profit),
       gross_margin_pct:
         net_revenue_ex_tax > 0
@@ -272,7 +341,9 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
           ? round2((books_net_profit / net_revenue_ex_tax) * 100)
           : null,
       recognized_orders,
+      // Paid recognized sales units only (aligned with orders / AOV)
       recognized_units: round2(recognized_units),
+      gift_units: round2(gift_units),
       aov_ex_tax:
         recognized_orders > 0
           ? round2(net_revenue_ex_tax / recognized_orders)
@@ -280,6 +351,7 @@ function aggregateLedgerPeriod(ledgerRows, header, since, until, catalogBySku = 
     },
     products: productRows,
     gift_units_by_key: giftUnits,
+    gift_product_costs,
     expense_rows: expenseRows,
     ads_rows: adsRows,
   };
@@ -392,12 +464,16 @@ function aggregateOpenPipeline(liveRows, header) {
 module.exports = {
   ADS_CATEGORY,
   DELIVERY_CATEGORY,
+  SHEET_RANGES,
+  LIVE_PIPELINE_HEADERS,
   colIndex,
   normalizeCategory,
   isAdsCategory,
   isDeliveryCategory,
   toYmd,
   inRange,
+  assertLivePipelineHeaders,
+  ledgerUidFromRef,
   loadLedger,
   loadRecurringExpenses,
   loadVariantMaster,
