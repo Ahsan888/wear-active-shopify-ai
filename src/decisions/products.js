@@ -2,6 +2,7 @@
  * Paid product decision classifications (Books only — no Meta allocation).
  */
 const { round2 } = require("../books/tax");
+const { safeDiv } = require("../meta/metrics");
 const { PRODUCTS } = require("./thresholds");
 
 function percentileSorted(sorted, p) {
@@ -11,6 +12,45 @@ function percentileSorted(sorted, p) {
     Math.max(0, Math.floor((sorted.length - 1) * p))
   );
   return sorted[idx];
+}
+
+function buildCogsDiagnostics(p) {
+  const units = Number(p.units || 0);
+  const ledger_cogs = Number(p.cogs || 0);
+  const vm_cost_per_item =
+    p.vm_cost_per_item == null ? null : Number(p.vm_cost_per_item);
+  const expected_vm_cogs =
+    vm_cost_per_item != null && vm_cost_per_item > 0 && units > 0
+      ? round2(units * vm_cost_per_item)
+      : null;
+  const cogs_coverage_ratio =
+    expected_vm_cogs != null && expected_vm_cogs > 0
+      ? round2(safeDiv(ledger_cogs, expected_vm_cogs) ?? 0)
+      : null;
+
+  const missing_ledger_cogs =
+    Number(p.revenue_ex_tax || 0) > 0 &&
+    units > 0 &&
+    vm_cost_per_item != null &&
+    vm_cost_per_item > 0 &&
+    ledger_cogs <= 0;
+
+  const low_cogs_coverage_warning =
+    !missing_ledger_cogs &&
+    cogs_coverage_ratio != null &&
+    cogs_coverage_ratio < PRODUCTS.COGS_COVERAGE_WARN_LT &&
+    expected_vm_cogs > 0 &&
+    Number(p.revenue_ex_tax || 0) > 0;
+
+  return {
+    ledger_cogs: round2(ledger_cogs),
+    expected_vm_cogs,
+    vm_cost_per_item,
+    units,
+    cogs_coverage_ratio,
+    missing_ledger_cogs,
+    low_cogs_coverage_warning,
+  };
 }
 
 function classifyProducts(products = []) {
@@ -50,7 +90,8 @@ function classifyProducts(products = []) {
 
   const classified = withShares.map((p) => {
     const flags = p.flags || [];
-    const dataIssue =
+    const cogsDiag = buildCogsDiagnostics(p);
+    const dataIssueSku =
       flags.includes("sku_missing_from_variant_master") ||
       flags.includes("missing_cost_per_item") ||
       (!p.sku && Number(p.revenue_ex_tax || 0) > 0);
@@ -70,16 +111,43 @@ function classifyProducts(products = []) {
       gross_profit_share_pct: p.gross_profit_share_pct,
       unit_share_pct: p.unit_share_pct,
       no_meta_allocation: true,
+      expected_vm_cogs: cogsDiag.expected_vm_cogs,
+      cogs_coverage_ratio: cogsDiag.cogs_coverage_ratio,
+      low_cogs_coverage_warning: cogsDiag.low_cogs_coverage_warning || false,
     };
 
-    if (dataIssue) {
+    if (dataIssueSku) {
       return {
         ...base,
         status: "data_issue",
         reason_code: "missing_sku_or_cost",
         reason: "Missing SKU and/or Variant Master cost data",
+        evidence: {
+          sku: p.sku || null,
+          flags,
+        },
       };
     }
+
+    // Hard-block missing Ledger COGS before hero / strong-margin / healthy
+    if (cogsDiag.missing_ledger_cogs) {
+      return {
+        ...base,
+        status: "data_issue",
+        reason_code: "missing_ledger_cogs",
+        reason:
+          "Paid recognized revenue/units exist and Variant Master has cost, but Ledger COGS is zero/absent — reported ~100% GM is not trustworthy",
+        evidence: {
+          ledger_cogs: cogsDiag.ledger_cogs,
+          expected_vm_cogs: cogsDiag.expected_vm_cogs,
+          vm_cost_per_item: cogsDiag.vm_cost_per_item,
+          units: cogsDiag.units,
+          revenue_ex_tax: p.revenue_ex_tax,
+          reported_gross_margin_pct: p.gross_margin_pct,
+        },
+      };
+    }
+
     if (Number(p.gross_profit || 0) < 0) {
       return {
         ...base,
@@ -177,5 +245,6 @@ function productKey(p) {
 
 module.exports = {
   classifyProducts,
+  buildCogsDiagnostics,
   percentileSorted,
 };

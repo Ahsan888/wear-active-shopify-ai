@@ -299,7 +299,7 @@ test("Scale suppressed because duplicate accounting warning", () => {
   assert.notStrictEqual(e.status, "scale_candidate");
 });
 
-test("Weak CTR relative to account", () => {
+test("Weak CTR relative to account (diagnostic retained)", () => {
   const d = diagnoseFunnel(
     {
       impressions: 5000,
@@ -314,6 +314,8 @@ test("Weak CTR relative to account", () => {
     buildAccountFunnelBaselines(accountMeta)
   );
   assert.ok(d.diagnostics.some((x) => x.code === "creative_click_weak"));
+  assert.strictEqual(d.has_funnel_warning, true);
+  assert.strictEqual(d.primary_weak_funnel, true); // 5000 >= 2×1000
 });
 
 test("Weak LPV→ATC relative to account", () => {
@@ -349,6 +351,265 @@ test("Funnel volume gate prevents noisy classification", () => {
     buildAccountFunnelBaselines(accountMeta)
   );
   assert.strictEqual(d.diagnostics.length, 0);
+});
+
+test("One weak ATC stage at exactly min gate → CPA status, warning, scale blocked", () => {
+  const e = classifyMetaEntity(
+    {
+      spend: 5000,
+      purchases: 4,
+      cpa: 1250,
+      roas: 1.8,
+      impressions: 500,
+      landing_page_views: 40, // exactly min gate
+      add_to_carts: 1,
+      lpv_to_atc_pct: 2.5, // < 0.6 * 5
+      initiated_checkouts: 1,
+      ad_id: "w1",
+      ad_name: "borderline",
+    },
+    accountMeta,
+    {
+      entity_type: "ad",
+      business_health_ok: true,
+      business_ads_ok: true,
+      confidence_ok: true,
+      accounting_scale_ok: true,
+      account_funnel_baselines: {
+        ...buildAccountFunnelBaselines(accountMeta),
+        lpv_to_atc_pct: 5,
+      },
+    }
+  );
+  assert.ok(["healthy", "strong"].includes(e.status));
+  assert.notStrictEqual(e.status, "weak_funnel");
+  assert.strictEqual(e.has_funnel_warning, true);
+  assert.strictEqual(e.primary_weak_funnel, false);
+  assert.strictEqual(e.scale_eligible, false);
+  assert.strictEqual(e.scale_checks.funnel_ok, false);
+});
+
+test("One weak ATC stage at 2× gate → primary weak_funnel", () => {
+  const e = classifyMetaEntity(
+    {
+      spend: 5000,
+      purchases: 4,
+      cpa: 1250,
+      roas: 1.8,
+      impressions: 500,
+      landing_page_views: 80,
+      add_to_carts: 2,
+      lpv_to_atc_pct: 2.5,
+      ad_id: "w2",
+      ad_name: "primaryfunnel",
+    },
+    accountMeta,
+    {
+      entity_type: "ad",
+      business_health_ok: true,
+      business_ads_ok: true,
+      confidence_ok: true,
+      accounting_scale_ok: true,
+      account_funnel_baselines: {
+        ...buildAccountFunnelBaselines(accountMeta),
+        lpv_to_atc_pct: 5,
+      },
+    }
+  );
+  assert.strictEqual(e.status, "weak_funnel");
+  assert.strictEqual(e.primary_weak_funnel, true);
+  assert.strictEqual(e.scale_eligible, false);
+});
+
+test("Two weak stages at normal gates → primary weak_funnel", () => {
+  const e = classifyMetaEntity(
+    {
+      spend: 5000,
+      purchases: 4,
+      cpa: 1250,
+      roas: 1.8,
+      impressions: 1200,
+      clicks: 10,
+      ctr: 0.8, // weak vs 2.0
+      inline_link_clicks: 40,
+      landing_page_views: 40,
+      add_to_carts: 1,
+      lpv_to_atc_pct: 2.5, // weak
+      ad_id: "w3",
+      ad_name: "twoweak",
+    },
+    accountMeta,
+    {
+      entity_type: "ad",
+      business_health_ok: true,
+      business_ads_ok: true,
+      confidence_ok: true,
+      accounting_scale_ok: true,
+      account_funnel_baselines: {
+        ...buildAccountFunnelBaselines(accountMeta),
+        ctr: 2.0,
+        lpv_to_atc_pct: 5,
+      },
+    }
+  );
+  assert.ok(e.funnel_diagnostics.length >= 2);
+  assert.strictEqual(e.primary_weak_funnel, true);
+  assert.strictEqual(e.status, "weak_funnel");
+});
+
+test("No weak stages → normal classification", () => {
+  const e = classifyMetaEntity(
+    {
+      spend: 5000,
+      purchases: 4,
+      cpa: 1250,
+      roas: 1.8,
+      impressions: 5000,
+      clicks: 100,
+      ctr: 2.0,
+      inline_link_clicks: 80,
+      landing_page_views: 60,
+      add_to_carts: 4,
+      lpv_to_atc_pct: 6.6,
+      initiated_checkouts: 3,
+      atc_to_checkout_pct: 75,
+      checkout_to_purchase_pct: 60,
+      ad_id: "okf",
+      ad_name: "clean",
+    },
+    accountMeta,
+    {
+      entity_type: "ad",
+      business_health_ok: true,
+      business_ads_ok: true,
+      confidence_ok: true,
+      accounting_scale_ok: true,
+    }
+  );
+  assert.strictEqual(e.has_funnel_warning, false);
+  assert.ok(["strong", "scale_candidate"].includes(e.status));
+});
+
+test("Scale candidate impossible when any funnel warning exists", () => {
+  const e = classifyMetaEntity(
+    {
+      spend: 5000,
+      purchases: 4,
+      cpa: 1250,
+      roas: 1.8,
+      impressions: 500,
+      landing_page_views: 40,
+      add_to_carts: 1,
+      lpv_to_atc_pct: 2.5,
+      ad_id: "scaleno",
+      ad_name: "warnblock",
+    },
+    accountMeta,
+    {
+      entity_type: "ad",
+      business_health_ok: true,
+      business_ads_ok: true,
+      confidence_ok: true,
+      accounting_scale_ok: true,
+      account_funnel_baselines: {
+        ...buildAccountFunnelBaselines(accountMeta),
+        lpv_to_atc_pct: 5,
+      },
+    }
+  );
+  assert.notStrictEqual(e.status, "scale_candidate");
+  assert.strictEqual(e.scale_checks.funnel_ok, false);
+});
+
+test("Missing Ledger COGS → data_issue not hero", () => {
+  const { products } = classifyProducts([
+    {
+      sku: "FF-1",
+      product: "FlexFlow-like",
+      units: 2,
+      revenue_ex_tax: 5000,
+      cogs: 0,
+      gross_profit: 5000,
+      gross_margin_pct: 100,
+      vm_cost_per_item: 1000,
+      flags: [],
+    },
+    {
+      sku: "OTHER",
+      product: "Other",
+      units: 10,
+      revenue_ex_tax: 20000,
+      cogs: 10000,
+      gross_profit: 10000,
+      gross_margin_pct: 50,
+      vm_cost_per_item: 1000,
+      flags: [],
+    },
+  ]);
+  const bad = products.find((p) => p.sku === "FF-1");
+  assert.strictEqual(bad.status, "data_issue");
+  assert.strictEqual(bad.reason_code, "missing_ledger_cogs");
+  assert.strictEqual(bad.evidence.expected_vm_cogs, 2000);
+  assert.strictEqual(bad.evidence.ledger_cogs, 0);
+
+  const recs = buildRecommendations({
+    business_health: { status: "profitable" },
+    business_advertising_safety: { status: "healthy" },
+    meta_efficiency: { status: "ok" },
+    productResult: { products },
+    confidence: { products: "high", entities: "medium" },
+    gates: {},
+    ads: [],
+    campaigns: [],
+  });
+  assert.ok(
+    recs.some(
+      (r) =>
+        r.reason_code === "missing_ledger_cogs" &&
+        r.action === "fix_product_data" &&
+        r.confidence === "low"
+    )
+  );
+  assert.ok(!recs.some((r) => r.reason_code === "hero_product" && r.entity_id === "FF-1"));
+});
+
+test("Genuine hero with Ledger COGS remains hero", () => {
+  const { products } = classifyProducts([
+    {
+      sku: "A",
+      product: "HeroA",
+      units: 10,
+      revenue_ex_tax: 10000,
+      cogs: 4000,
+      gross_profit: 6000,
+      gross_margin_pct: 60,
+      vm_cost_per_item: 400,
+      flags: [],
+    },
+    {
+      sku: "B",
+      product: "B",
+      units: 5,
+      revenue_ex_tax: 5000,
+      cogs: 2500,
+      gross_profit: 2500,
+      gross_margin_pct: 50,
+      vm_cost_per_item: 500,
+      flags: [],
+    },
+    {
+      sku: "C",
+      product: "C",
+      units: 4,
+      revenue_ex_tax: 4000,
+      cogs: 2000,
+      gross_profit: 2000,
+      gross_margin_pct: 50,
+      vm_cost_per_item: 500,
+      flags: [],
+    },
+  ]);
+  assert.strictEqual(products.find((p) => p.sku === "A").status, "hero");
 });
 
 test("Product hero top-3 GP", () => {

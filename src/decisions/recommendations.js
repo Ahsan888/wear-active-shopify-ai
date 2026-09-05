@@ -242,6 +242,41 @@ function buildRecommendations({
     );
   }
 
+  // Soft funnel warnings on otherwise efficient entities (info / low)
+  for (const entity of [...ads, ...campaigns]) {
+    if (!entity.has_funnel_warning) continue;
+    if (entity.status === "weak_funnel") continue;
+    if (
+      ![
+        "healthy",
+        "strong",
+        "scale_candidate",
+        "relatively_weak_cpa",
+      ].includes(entity.status)
+    ) {
+      continue;
+    }
+    out.push(
+      rec({
+        priority: "low",
+        area: entity.entity_type || "ad",
+        action: "investigate_funnel",
+        entity_type: entity.entity_type,
+        entity_id: entity.entity_id,
+        entity_name: entity.entity_name,
+        reason_code: "funnel_warning_non_primary",
+        reason:
+          "Funnel stage(s) below account baseline with only borderline evidence — status remains CPA-based; scale blocked until resolved",
+        evidence: {
+          status: entity.status,
+          funnel_diagnostics: entity.funnel_diagnostics,
+        },
+        confidence: confidence?.entities || "medium",
+        attribution_note: "meta_attributed_only",
+      })
+    );
+  }
+
   for (const entity of [...ads, ...campaigns]) {
     if (entity.status !== "scale_candidate") continue;
     out.push(
@@ -314,7 +349,10 @@ function buildRecommendations({
           attribution_note: "books_only",
         })
       );
-    } else if (p.status === "data_issue" && p.revenue_share_pct >= 5) {
+    } else if (
+      p.status === "data_issue" &&
+      (p.reason_code === "missing_ledger_cogs" || p.revenue_share_pct >= 5)
+    ) {
       out.push(
         rec({
           priority: "medium",
@@ -323,11 +361,14 @@ function buildRecommendations({
           entity_type: "sku",
           entity_id: p.sku,
           entity_name: p.product,
-          reason_code: "missing_sku_or_cost",
+          reason_code: p.reason_code || "missing_sku_or_cost",
           reason: p.reason,
           evidence: {
             revenue_share_pct: p.revenue_share_pct,
             flags: p.flags,
+            ...(p.evidence || {}),
+            expected_vm_cogs: p.expected_vm_cogs,
+            cogs_coverage_ratio: p.cogs_coverage_ratio,
           },
           confidence: "low",
           attribution_note: "books_only",

@@ -80,14 +80,18 @@ function entityFunnelRates(row = {}) {
 
 /**
  * Baseline-relative funnel diagnostics. Volume gates prevent noisy labels.
+ *
+ * has_funnel_warning: any weak stage that cleared its min volume gate
+ * primary_weak_funnel: ≥2 weak stages OR one weak stage at ≥2× its min gate
+ * has_material_weak_funnel: alias for has_funnel_warning (blocks scale)
  */
 function diagnoseFunnel(entityRow, accountBaselines) {
   const diagnostics = [];
   const rates = entityFunnelRates(entityRow);
   const acc = accountBaselines || {};
 
-  function maybeWeak(code, entityRate, accountRate, volumeOk) {
-    if (!volumeOk) return;
+  function maybeWeak(code, entityRate, accountRate, volume, minGate) {
+    if (!(volume >= minGate)) return;
     if (entityRate == null || accountRate == null || !(accountRate > 0)) return;
     if (entityRate < FUNNEL.WEAK_RELATIVE_LT * accountRate) {
       diagnostics.push({
@@ -95,6 +99,11 @@ function diagnoseFunnel(entityRow, accountBaselines) {
         entity_rate: entityRate,
         account_rate: accountRate,
         relative: round2(entityRate / accountRate),
+        volume,
+        min_gate: minGate,
+        primary_volume_gate: minGate * FUNNEL.PRIMARY_VOLUME_MULTIPLIER,
+        meets_primary_volume:
+          volume >= minGate * FUNNEL.PRIMARY_VOLUME_MULTIPLIER,
       });
     }
   }
@@ -103,37 +112,50 @@ function diagnoseFunnel(entityRow, accountBaselines) {
     "creative_click_weak",
     rates.ctr,
     acc.ctr,
-    rates.impressions >= FUNNEL.CTR_MIN_IMPRESSIONS
+    rates.impressions,
+    FUNNEL.CTR_MIN_IMPRESSIONS
   );
   maybeWeak(
     "landing_page_weak",
     rates.click_to_lpv_pct,
     acc.click_to_lpv_pct,
-    rates.inline_link_clicks >= FUNNEL.CLICK_LPV_MIN_LINK_CLICKS
+    rates.inline_link_clicks,
+    FUNNEL.CLICK_LPV_MIN_LINK_CLICKS
   );
   maybeWeak(
     "offer_atc_weak",
     rates.lpv_to_atc_pct,
     acc.lpv_to_atc_pct,
-    rates.landing_page_views >= FUNNEL.LPV_ATC_MIN_LPV
+    rates.landing_page_views,
+    FUNNEL.LPV_ATC_MIN_LPV
   );
   maybeWeak(
     "checkout_start_weak",
     rates.atc_to_checkout_pct,
     acc.atc_to_checkout_pct,
-    rates.add_to_carts >= FUNNEL.ATC_IC_MIN_ATC
+    rates.add_to_carts,
+    FUNNEL.ATC_IC_MIN_ATC
   );
   maybeWeak(
     "purchase_completion_weak",
     rates.checkout_to_purchase_pct,
     acc.checkout_to_purchase_pct,
-    rates.initiated_checkouts >= FUNNEL.IC_PURCH_MIN_IC
+    rates.initiated_checkouts,
+    FUNNEL.IC_PURCH_MIN_IC
   );
+
+  const has_funnel_warning = diagnostics.length > 0;
+  const primary_weak_funnel =
+    diagnostics.length >= 2 ||
+    diagnostics.some((d) => d.meets_primary_volume);
 
   return {
     rates,
     diagnostics,
-    has_material_weak_funnel: diagnostics.length > 0,
+    has_funnel_warning,
+    primary_weak_funnel,
+    // Any funnel warning blocks scale (conservative)
+    has_material_weak_funnel: has_funnel_warning,
   };
 }
 
@@ -194,6 +216,8 @@ function classifyMetaEntity(row, accountMeta, options = {}) {
         ? round2(entityRoas / accountRoas)
         : null,
     funnel_diagnostics: funnel.diagnostics,
+    has_funnel_warning: funnel.has_funnel_warning,
+    primary_weak_funnel: funnel.primary_weak_funnel,
     attribution_note: "meta_attributed_only",
   };
 
@@ -253,23 +277,23 @@ function classifyMetaEntity(row, accountMeta, options = {}) {
   ) {
     status = "relatively_weak_cpa";
     reason_code = "entity_cpa_slightly_above_account";
+  } else if (funnel.primary_weak_funnel) {
+    // Primary status only with escalated funnel evidence
+    status = "weak_funnel";
+    reason_code = "material_funnel_weakness";
   } else if (
     cpaRatio != null &&
     cpaRatio <= ENTITY_WITH_PURCHASES.STRONG_CPA_LTE &&
-    purchases >= ENTITY_WITH_PURCHASES.STRONG_MIN_PURCHASES &&
-    !funnel.has_material_weak_funnel
+    purchases >= ENTITY_WITH_PURCHASES.STRONG_MIN_PURCHASES
   ) {
     status = "strong";
     reason_code = "entity_cpa_strong_vs_account";
-  } else if (funnel.has_material_weak_funnel) {
-    status = "weak_funnel";
-    reason_code = "material_funnel_weakness";
   } else if (cpaRatio != null && cpaRatio <= 1) {
     status = "healthy";
     reason_code = "cpa_at_or_below_account";
   }
 
-  // Scale candidate — all conditions (business gates applied by caller via options)
+  // Scale candidate — any funnel warning blocks scale (conservative)
   const scaleChecks = {
     purchases_ok: purchases >= ENTITY_WITH_PURCHASES.SCALE_MIN_PURCHASES,
     spend_ok:
@@ -282,7 +306,7 @@ function classifyMetaEntity(row, accountMeta, options = {}) {
     roas_ok:
       roasRatio != null &&
       roasRatio >= ENTITY_WITH_PURCHASES.SCALE_MIN_ROAS_X_ACCOUNT,
-    funnel_ok: !funnel.has_material_weak_funnel,
+    funnel_ok: !funnel.has_funnel_warning,
     business_health_ok: options.business_health_ok === true,
     business_ads_ok: options.business_ads_ok === true,
     confidence_ok: options.confidence_ok === true,

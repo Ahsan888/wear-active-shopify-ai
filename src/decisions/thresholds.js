@@ -55,6 +55,8 @@ const FUNNEL = {
   LPV_ATC_MIN_LPV: 40,
   ATC_IC_MIN_ATC: 5,
   IC_PURCH_MIN_IC: 3,
+  /** Single weak stage becomes primary weak_funnel only at ≥ this × min gate */
+  PRIMARY_VOLUME_MULTIPLIER: 2,
 };
 
 /** Product portfolio rules */
@@ -66,6 +68,8 @@ const PRODUCTS = {
   STRONG_MARGIN_LOW_VOL_REV_SHARE_LT: 5,
   LOW_VOLUME_REV_SHARE_LT: 2,
   LOW_VOLUME_UNITS_LTE: 2,
+  /** Soft flag only — does not hard-fail product status */
+  COGS_COVERAGE_WARN_LT: 0.5,
 };
 
 /** Accounting / confidence gates */
