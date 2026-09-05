@@ -43,6 +43,8 @@
     "reports:merge": "node src/scripts/merge-reports.js",
     "profitability:report": "node src/scripts/profitability-report.js",
     "profitability:test": "node src/scripts/profitability-self-test.js",
+    "decisions:report": "node src/scripts/decision-report.js",
+    "decisions:test": "node src/scripts/decision-self-test.js",
     "sheets:info": "node src/scripts/sheets-info.js",
     "sheets:write": "node src/scripts/sheets-write.js",
     "shopify:ping": "node src/scripts/shopify-ping.js",
