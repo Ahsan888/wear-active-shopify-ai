@@ -171,18 +171,25 @@ async function main() {
     "Recognized",
     "Posted",
     "Order Tags",
+    "Attribution Status",
+    "First Touch Source",
+    "First Touch Campaign",
+    "First Touch Content",
+    "Last Touch Source",
+    "Last Touch Campaign",
+    "Last Touch Content",
+    "Meta Click ID Present",
+    "Attribution Version",
   ];
   const toAdd = needed.filter((h) => !lh.includes(h));
   if (toAdd.length) {
-    // Clear duplicate trailing line_uid header if present at Y (index 24)
-    const startCol = Math.max(lh.length, 23) + 1; // after first block
-    // Prefer writing starting at column Z (26) for clarity
-    const start = 26;
+    // Append only missing headers after the current header row (never rewrite existing)
+    const start = lh.length + 1;
     await sheets.spreadsheets.values.update({
       spreadsheetId,
       range: `'Shopify Orders (LIVE)'!${colToA1(start)}1`,
       valueInputOption: "USER_ENTERED",
-      requestBody: { values: [needed] },
+      requestBody: { values: [toAdd] },
     });
     // Blank out duplicate line_uid at Y if it's the second one
     if (lh[24] === "line_uid" || lh[23] === "notes") {
@@ -193,9 +200,9 @@ async function main() {
         requestBody: { values: [["", ""]] },
       });
     }
-    console.log("Added LIVE columns at Z:", needed.join(", "));
+    console.log("Added LIVE columns:", toAdd.join(", "));
   } else {
-    console.log("LIVE tax/recognition columns already present");
+    console.log("LIVE tax/recognition/attribution columns already present");
   }
 
   // Config sheet seed

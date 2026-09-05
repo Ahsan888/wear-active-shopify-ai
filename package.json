@@ -50,6 +50,8 @@
     "reports:daily": "node src/scripts/reports-daily.js",
     "reports:backfill": "node src/scripts/reports-backfill.js",
     "operations:test": "node src/scripts/operations-self-test.js",
+    "attribution:report": "node src/scripts/attribution-report.js",
+    "attribution:test": "node src/scripts/attribution-self-test.js",
     "dashboard:test": "node src/scripts/dashboard-self-test.js",
     "sheets:info": "node src/scripts/sheets-info.js",
     "sheets:write": "node src/scripts/sheets-write.js",

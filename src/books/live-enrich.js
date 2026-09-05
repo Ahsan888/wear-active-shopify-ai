@@ -28,6 +28,24 @@ async function fetchOrderMetaByIds(orderIds) {
             displayFinancialStatus
             displayFulfillmentStatus
             cancelledAt
+            customAttributes { key value }
+            customerJourneySummary {
+              ready
+              firstVisit {
+                landingPage
+                referrerUrl
+                source
+                utmParameters { source medium campaign content term }
+                occurredAt
+              }
+              lastVisit {
+                landingPage
+                referrerUrl
+                source
+                utmParameters { source medium campaign content term }
+                occurredAt
+              }
+            }
           }
         }
       }`,
@@ -44,6 +62,8 @@ async function fetchOrderMetaByIds(orderIds) {
         ).toLowerCase(),
         cancelled: !!node.cancelledAt,
         name: node.name,
+        customAttributes: node.customAttributes || [],
+        customerJourneySummary: node.customerJourneySummary || null,
       };
     }
   }
@@ -61,6 +81,8 @@ function parseUid(uid) {
  * enrichWrites: batchUpdate ranges for new columns
  */
 function enrichLiveRows(header, dataRows, orderMeta) {
+  const { normalizeOrderAttribution } = require("../attribution/normalize");
+  const { liveSheetAttributionColumns } = require("../attribution/coverage");
   const col = (name) => header.indexOf(name);
   const iUid = col("line_uid");
   const iPay = col("Payment Status");
@@ -136,6 +158,23 @@ function enrichLiveRows(header, dataRows, orderMeta) {
     if (iTags >= 0) rowWrites.push([iTags, (tags || []).join(", ")]);
     if (iPay >= 0 && meta) rowWrites.push([iPay, payN]);
     if (iFul >= 0 && meta) rowWrites.push([iFul, fulN]);
+
+    // Attribution metadata only — does not change recognition/tax/COGS
+    if (meta) {
+      const attr = normalizeOrderAttribution({
+        name: meta.name,
+        customAttributes: meta.customAttributes,
+        customerJourneySummary: meta.customerJourneySummary,
+      });
+      const cols = liveSheetAttributionColumns(attr);
+      for (const [name, val] of Object.entries(cols)) {
+        const cIdx = col(name);
+        if (cIdx >= 0) {
+          r[cIdx] = val;
+          rowWrites.push([cIdx, val]);
+        }
+      }
+    }
 
     for (const [cIdx, val] of rowWrites) {
       writes.push({

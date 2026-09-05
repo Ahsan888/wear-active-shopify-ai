@@ -462,6 +462,7 @@ function buildOwnerEmailContent({
   dashboard_path,
   days,
   policy = DEFAULT_OWNER_POLICY,
+  attribution = null,
 }) {
   const reporting_date = snapshot.reporting_date;
   const curated = selectOwnerDeliveryAlerts({
@@ -554,10 +555,36 @@ function buildOwnerEmailContent({
   } else {
     top_actions.forEach((t, i) => textLines.push(`${i + 1}. ${t}`));
   }
+  if (
+    attribution &&
+    attribution.attribution_coverage_pct != null &&
+    !attribution.error
+  ) {
+    const cov = attribution.attribution_coverage_pct;
+    textLines.push("");
+    textLines.push(
+      cov < 60
+        ? `Attribution coverage still building: ${cov}%`
+        : `Attribution coverage: ${cov}% of Shopify orders`
+    );
+  }
   textLines.push("");
   textLines.push(`Dashboard: ${dashboard_path || "reports/dashboard/index.html"}`);
 
   const text = textLines.join("\n");
+  let attributionLine = null;
+  if (
+    attribution &&
+    attribution.attribution_coverage_pct != null &&
+    !attribution.error
+  ) {
+    const cov = attribution.attribution_coverage_pct;
+    attributionLine =
+      cov < 60
+        ? `Attribution coverage still building: ${cov}%`
+        : `Attribution coverage: ${cov}% of Shopify orders`;
+  }
+
   const html = buildOwnerEmailHtml({
     reporting_date,
     days,
@@ -568,6 +595,7 @@ function buildOwnerEmailContent({
     resolved_count: curated.resolved_count,
     top_actions,
     dashboard_path,
+    attributionLine,
   });
 
   return {
@@ -603,6 +631,7 @@ function buildOwnerEmailHtml({
   resolved_count,
   top_actions,
   dashboard_path,
+  attributionLine = null,
 }) {
   const health = prettyLabel(snapshot.business?.health_status);
   const alertBlock = (title, items) => {
@@ -694,6 +723,11 @@ function buildOwnerEmailHtml({
   ${actions}
 </td></tr>
 <tr><td style="padding:20px 28px 28px;">
+  ${
+    attributionLine
+      ? `<p style="margin:0 0 10px;font-size:12px;color:#5c655e;">${escapeHtml(attributionLine)}</p>`
+      : ""
+  }
   <p style="margin:0;font-size:12px;color:#5c655e;">Dashboard / report: <span style="color:#0f6b5c;">${escapeHtml(
     dashboard_path || "reports/dashboard/index.html"
   )}</span></p>

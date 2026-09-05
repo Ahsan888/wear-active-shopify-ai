@@ -47,6 +47,7 @@ function buildDeliveryPayload({
   loadAlertsFn,
   bundle,
   config,
+  attribution,
 }) {
   const policy = {
     ...DEFAULT_OWNER_POLICY,
@@ -72,6 +73,7 @@ function buildDeliveryPayload({
     dashboard_path,
     days,
     policy,
+    attribution,
   });
 
   return {
@@ -264,6 +266,7 @@ async function deliverDailyReport(
     history,
     loadAlertsFn,
     bundle,
+    attribution,
   },
   config,
   { force = false, cwd = process.cwd(), fetchImpl } = {}
@@ -283,6 +286,7 @@ async function deliverDailyReport(
     loadAlertsFn,
     bundle,
     config,
+    attribution,
   });
 
   const baseAudit = {

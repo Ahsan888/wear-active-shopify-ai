@@ -187,6 +187,26 @@ async function runDailyReport(options = {}) {
     config,
   });
 
+  // Phase 5A — experimental attribution diagnostics (optional; never alters classifiers)
+  let attribution = null;
+  try {
+    const {
+      fetchOrdersForAttribution,
+    } = require("../attribution/fetchOrders");
+    const {
+      buildAttributionDiagnostics,
+    } = require("../attribution/coverage");
+    const orders = await fetchOrdersForAttribution({
+      since: period.since,
+      until: period.until,
+    });
+    attribution = buildAttributionDiagnostics(orders, {});
+    delete attribution.orders;
+    operationalBundle.attribution = attribution;
+  } catch {
+    attribution = null;
+  }
+
   let delivery = null;
   let deliveryError = null;
 
@@ -247,6 +267,7 @@ async function runDailyReport(options = {}) {
           history: nextHistory,
           loadAlertsFn,
           bundle: baseBundle,
+          attribution,
         },
         { ...config, delivery_enabled: deliveryEnabled },
         { force: forceDelivery, cwd }

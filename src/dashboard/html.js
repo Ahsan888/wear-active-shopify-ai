@@ -962,6 +962,86 @@ function renderDataQuality(ctx) {
 </div>`;
 }
 
+function renderAttribution(ctx) {
+  const attr = ctx.report?.attribution;
+  if (!attr) {
+    return `<div id="view-attribution" class="view">
+  <section>
+    <div class="divider-label">FIRST-PARTY ATTRIBUTION — EXPERIMENTAL</div>
+    <h2>Attribution</h2>
+    <p class="note">Attribution diagnostics are not loaded for this report. Run <code>npm run attribution:report</code> or regenerate the dashboard.</p>
+    <p class="note">Phase 5A does not compute attributed profit. Meta platform metrics and Shopify contribution remain separate.</p>
+  </section>
+</div>`;
+  }
+
+  const s = attr.status_counts || {};
+  const c = attr.confidence_counts || {};
+  const e = attr.entity_ids || {};
+  const warnings = Object.entries(attr.warnings || {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(
+      ([code, n]) =>
+        `<li><strong>${escapeHtml(code)}</strong> — ${num(n, 0)}</li>`
+    )
+    .join("");
+  const sources = Object.entries(attr.source_distribution || {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(
+      ([src, n]) =>
+        `<tr><td>${escapeHtml(src)}</td><td>${num(n, 0)}</td></tr>`
+    )
+    .join("");
+
+  return `<div id="view-attribution" class="view">
+  <section>
+    <div class="divider-label">FIRST-PARTY ATTRIBUTION — EXPERIMENTAL</div>
+    <h2>Attribution Coverage</h2>
+    <p class="note">Conservative first-party + Shopify journey diagnostics. No attributed profit. Capture started ${escapeHtml(attr.capture_started_at || "—")} · basis ${escapeHtml(attr.coverage_basis || "—")}.</p>
+    <div class="grid">
+      ${card("Coverage", attr.attribution_coverage_pct == null ? "—" : pct(attr.attribution_coverage_pct))}
+      ${card("Shopify orders", num(attr.shopify_orders, 0))}
+      ${card("Post-capture orders", num(attr.post_capture_orders, 0))}
+      ${card("Usable (basis)", num(attr.coverage_basis === "post_capture" ? attr.post_capture_usable : attr.usable_attribution, 0))}
+      ${card("Meta first-party", num(s.meta_first_party, 0))}
+      ${card("Unattributed", num(s.unattributed, 0))}
+    </div>
+  </section>
+  <section>
+    <h2>Status &amp; Confidence</h2>
+    <div class="grid">
+      ${card("Organic", num(s.organic, 0))}
+      ${card("Direct", num(s.direct, 0))}
+      ${card("Paid non-Meta", num(s.paid_non_meta, 0))}
+      ${card("Unknown", num(s.unknown, 0))}
+      ${card("High confidence", num(c.high, 0))}
+      ${card("Medium", num(c.medium, 0))}
+      ${card("Low", num(c.low, 0))}
+      ${card("None", num(c.none, 0))}
+    </div>
+  </section>
+  <section>
+    <h2>Stable Meta ID Matching</h2>
+    <div class="grid">
+      ${card("Campaign matched", `${num(e.campaign_matched, 0)} / ${num(e.campaign_present, 0)}`)}
+      ${card("Ad set matched", `${num(e.adset_matched, 0)} / ${num(e.adset_present, 0)}`)}
+      ${card("Ad matched", `${num(e.ad_matched, 0)} / ${num(e.ad_present, 0)}`)}
+    </div>
+    <p class="note">Matching uses stable IDs only — no fuzzy ad-name joins.</p>
+  </section>
+  <section>
+    <h2>Source Distribution</h2>
+    <table><thead><tr><th>Source</th><th>Orders</th></tr></thead><tbody>${sources || `<tr><td colspan="2" class="empty">No sources.</td></tr>`}</tbody></table>
+  </section>
+  <section>
+    <h2>Data Quality</h2>
+    <ul class="warn-list">${warnings || `<li class="empty">No attribution warnings.</li>`}</ul>
+  </section>
+</div>`;
+}
+
 const STYLES = `
 :root {
   --bg: #f5f4f0;
@@ -1484,6 +1564,7 @@ function renderUnifiedDashboard(report) {
     ["advertising", "Advertising"],
     ["decisions", "Decisions"],
     ["data-quality", "Data Quality"],
+    ["attribution", "Attribution"],
   ];
 
   const navHtml = navItems
@@ -1528,6 +1609,7 @@ function renderUnifiedDashboard(report) {
     ${renderAdvertising(ctx)}
     ${renderDecisions(ctx)}
     ${renderDataQuality(ctx)}
+    ${renderAttribution(ctx)}
 
     <footer>
       Wear Active Reporting &amp; Decision Intelligence · Advisory only · No Meta mutations · No Sheet writes
