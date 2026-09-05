@@ -41,6 +41,8 @@
     "meta:report:full": "node src/scripts/meta-report-full.js",
     "meta:test": "node src/scripts/meta-self-test.js",
     "reports:merge": "node src/scripts/merge-reports.js",
+    "profitability:report": "node src/scripts/profitability-report.js",
+    "profitability:test": "node src/scripts/profitability-self-test.js",
     "sheets:info": "node src/scripts/sheets-info.js",
     "sheets:write": "node src/scripts/sheets-write.js",
     "shopify:ping": "node src/scripts/shopify-ping.js",

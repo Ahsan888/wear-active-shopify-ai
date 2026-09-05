@@ -114,9 +114,12 @@ Local-only under the editor (gitignored): `input/`, `photos/`, `gpt_output/`,
 | `meta:report:full` | Export detailed Meta report files under `reports/meta/` |
 | `meta:test` | Pure-function tests for Meta metrics/CLI validation |
 | `reports:merge` | Conservative Meta (+ optional Shopify) merge stub |
+| `profitability:report` | Blended Meta + Books profitability (read-only) |
+| `profitability:test` | Pure-function tests for no-double-count / reconcile |
 
 Low-stock setup: [docs/LOW-STOCK-ALERTS.md](docs/LOW-STOCK-ALERTS.md).  
-Meta Ads setup: [docs/META_SETUP.md](docs/META_SETUP.md).
+Meta Ads setup: [docs/META_SETUP.md](docs/META_SETUP.md).  
+Profitability: [docs/PROFITABILITY_REPORTING.md](docs/PROFITABILITY_REPORTING.md).
 
 Some `package.json` script names refer to one-off catalog scripts that may not
 exist in every checkout; the books and client scripts above are the supported
