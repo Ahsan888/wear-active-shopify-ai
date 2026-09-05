@@ -11,6 +11,12 @@ google-service-account.json
 credentials*.json
 *.pem
 
+# Generated Meta / merged reports (keep folder placeholders only)
+reports/meta/**
+!reports/meta/.gitkeep
+reports/merged/**
+!reports/merged/.gitkeep
+
 # OS / editor noise
 .DS_Store
 Thumbs.db

@@ -109,8 +109,13 @@ Local-only under the editor (gitignored): `input/`, `photos/`, `gpt_output/`,
 | `packs:setup` | Audit native outfit/family packs (`--apply` creates or updates drafts) |
 | `stock:low` | Dry-run: list variants with 1 unit left |
 | `stock:low:send` | Email that low-stock report |
+| `meta:check` | Verify Meta Ads token + ad account insights |
+| `meta:report` | Campaign/adset/ad performance report (`--json` supported) |
+| `meta:report:full` | Export detailed Meta report files under `reports/meta/` |
+| `reports:merge` | Conservative Meta (+ optional Shopify) merge stub |
 
-Low-stock setup: [docs/LOW-STOCK-ALERTS.md](docs/LOW-STOCK-ALERTS.md).
+Low-stock setup: [docs/LOW-STOCK-ALERTS.md](docs/LOW-STOCK-ALERTS.md).  
+Meta Ads setup: [docs/META_SETUP.md](docs/META_SETUP.md).
 
 Some `package.json` script names refer to one-off catalog scripts that may not
 exist in every checkout; the books and client scripts above are the supported
