@@ -1,0 +1,139 @@
+name: Daily operational report
+
+# GitHub cron is UTC. 04:00 UTC = 09:00 Asia/Karachi (PKT, UTC+5).
+# Reporting logic still uses Asia/Karachi explicitly.
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Trailing window days"
+        required: false
+        default: "7"
+      date:
+        description: "Reporting date YYYY-MM-DD (blank = today Asia/Karachi)"
+        required: false
+        default: ""
+      send_email:
+        description: "Send Resend email (manual runs default false)"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: wear-active-daily-report
+  cancel-in-progress: false
+
+jobs:
+  daily-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Restore operational state cache
+        uses: actions/cache/restore@v4
+        with:
+          path: reports/state
+          key: wa-ops-state-${{ github.run_id }}
+          restore-keys: |
+            wa-ops-state-
+
+      - name: Unpack operational state into reports/
+        run: |
+          mkdir -p reports/snapshots reports/delivery reports/alerts reports/briefs reports/dashboard reports/state
+          if [ -f reports/state/snapshots/history.jsonl ]; then
+            cp reports/state/snapshots/history.jsonl reports/snapshots/history.jsonl
+          fi
+          if [ -f reports/state/delivery/history.jsonl ]; then
+            cp reports/state/delivery/history.jsonl reports/delivery/history.jsonl
+          fi
+          if [ -d reports/state/alerts ]; then
+            cp -f reports/state/alerts/*.json reports/alerts/ 2>/dev/null || true
+          fi
+
+      - name: Write Google service account file
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICE_ACCOUNT_JSON" ]; then
+            echo "Missing GOOGLE_SERVICE_ACCOUNT_JSON secret"
+            exit 1
+          fi
+          printf '%s' "$GOOGLE_SERVICE_ACCOUNT_JSON" > google-service-account.json
+
+      - name: Smoke operations tests
+        run: npm run operations:test
+
+      - name: Run daily report
+        id: report
+        env:
+          SHOPIFY_SHOP: ${{ secrets.SHOPIFY_SHOP }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          SHOPIFY_API_VERSION: ${{ vars.SHOPIFY_API_VERSION }}
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_AD_ACCOUNT_ID: ${{ secrets.META_AD_ACCOUNT_ID }}
+          META_API_VERSION: ${{ vars.META_API_VERSION }}
+          GOOGLE_SERVICE_ACCOUNT_FILE: ./google-service-account.json
+          GOOGLE_SHEETS_SPREADSHEET_ID: ${{ secrets.GOOGLE_SHEETS_SPREADSHEET_ID }}
+          REPORT_TIMEZONE: Asia/Karachi
+          REPORT_DAILY_DAYS: ${{ github.event.inputs.days || '7' }}
+          REPORT_DELIVERY_CHANNEL: resend
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          REPORT_EMAIL_TO: ${{ secrets.REPORT_EMAIL_TO }}
+          REPORT_EMAIL_FROM: ${{ secrets.REPORT_EMAIL_FROM }}
+          LOW_STOCK_EMAIL_TO: ${{ secrets.LOW_STOCK_EMAIL_TO }}
+          LOW_STOCK_EMAIL_FROM: ${{ secrets.LOW_STOCK_EMAIL_FROM }}
+          # Scheduled: email on. Manual: only when send_email=true.
+          REPORT_DELIVERY_ENABLED: ${{ github.event_name == 'schedule' || github.event.inputs.send_email == 'true' }}
+        run: |
+          DAYS="${{ github.event.inputs.days || '7' }}"
+          DATE_ARG=""
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            DATE_ARG="--date=${{ github.event.inputs.date }}"
+          fi
+          echo "Delivery enabled: $REPORT_DELIVERY_ENABLED"
+          npm run reports:daily -- --days="$DAYS" $DATE_ARG
+
+      - name: Pack operational state
+        if: always()
+        run: |
+          mkdir -p reports/state/snapshots reports/state/delivery reports/state/alerts
+          if [ -f reports/snapshots/history.jsonl ]; then
+            cp reports/snapshots/history.jsonl reports/state/snapshots/history.jsonl
+          fi
+          if [ -f reports/delivery/history.jsonl ]; then
+            cp reports/delivery/history.jsonl reports/state/delivery/history.jsonl
+          fi
+          cp -f reports/alerts/*d.json reports/state/alerts/ 2>/dev/null || true
+
+      - name: Save operational state cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: reports/state
+          key: wa-ops-state-${{ github.run_id }}
+
+      - name: Upload report artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-report-${{ github.run_id }}
+          path: |
+            reports/dashboard/
+            reports/briefs/
+            reports/alerts/
+            reports/snapshots/
+            reports/delivery/
+            reports/state/
+          retention-days: 30
+          if-no-files-found: warn

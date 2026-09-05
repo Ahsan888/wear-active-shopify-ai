@@ -125,6 +125,14 @@ Local-only under the editor (gitignored): `input/`, `photos/`, `gpt_output/`,
 | `dashboard:test` | Sales-mix + dashboard pure-function tests |
 | `profitability:test` | Pure-function tests for no-double-count / reconcile |
 
+Local daily generation (no email):
+
+```bash
+npm run reports:daily -- --days=7 --no-delivery
+```
+
+Production owner email is sent by **GitHub Actions + Resend** (same `RESEND_API_KEY` pattern as low-stock). Do not rely on local `.env` for scheduled delivery.
+
 Low-stock setup: [docs/LOW-STOCK-ALERTS.md](docs/LOW-STOCK-ALERTS.md).  
 Meta Ads setup: [docs/META_SETUP.md](docs/META_SETUP.md).  
 Profitability: [docs/PROFITABILITY_REPORTING.md](docs/PROFITABILITY_REPORTING.md).  

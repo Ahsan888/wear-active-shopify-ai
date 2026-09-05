@@ -22,13 +22,11 @@ Dashboard + snapshot + brief + alerts + delivery
 ## Daily pipeline
 
 ```bash
-npm run reports:daily
-npm run reports:daily -- --date=2026-09-06
-npm run reports:daily -- --days=7
-npm run reports:daily -- --no-delivery
-npm run reports:daily -- --dry-run
+# Local generation only (no email)
+npm run reports:daily -- --days=7 --no-delivery
+npm run reports:daily -- --date=2026-09-06 --days=7 --no-delivery
+npm run reports:daily -- --days=7 --dry-run
 npm run reports:daily -- --json
-npm run reports:daily -- --force-delivery
 ```
 
 Defaults:
@@ -39,166 +37,131 @@ Defaults:
 | Window | Trailing `REPORT_DAILY_DAYS` (default 7) |
 | Delivery | **Disabled** (`REPORT_DELIVERY_ENABLED=false`) |
 
-Orchestrator: `src/operations/daily.js`
+Production owner email is sent by **GitHub Actions + Resend**, not by a normal local run.
 
-1. Load inputs for trailing window  
-2. Build unified reporting bundle  
-3. Build compact KPI snapshot  
-4. Load history → trends  
-5. Evaluate alerts (+ lifecycle vs prior day)  
-6. Build deterministic brief  
-7. Render dashboard with operational trends/alerts  
-8. Persist dated outputs + upsert history (unless `--dry-run`)  
-9. Optional delivery  
+## Period-specific artifacts
 
-`--dry-run`: compute + print preview; **no** history write, **no** latest overwrite, **no** delivery.
+Canonical dated files include the period length:
+
+```text
+reports/snapshots/2026-09-06-7d.json
+reports/briefs/2026-09-06-7d.txt
+reports/briefs/2026-09-06-7d.json
+reports/alerts/2026-09-06-7d.json
+reports/delivery/2026-09-06-7d.json
+```
+
+30-day runs use `-30d`. `latest.txt` / `latest.json` remain convenience aliases for the most recent run.
+
+History keys remain:
+
+`snapshot_key = \`${reporting_date}:${period.days}\``
+
+## Period-specific alert lifecycle
+
+Lifecycle compares only against prior alerts for the **same** `period.days`:
+
+`2026-09-05-7d.json` → previous source for `2026-09-06-7d.json`
+
+A 30d run never drives 7d persistence/reminders.
+
+## Delivery history & dedupe
+
+Source of truth: `reports/delivery/history.jsonl`
+
+`delivery_key = daily-report:${reporting_date}:${period.days}`
+
+| Sequence | Result |
+|---|---|
+| 7d deliver | sent |
+| 30d deliver | sent |
+| 7d again | `already_delivered` |
+| 7d + `--force-delivery` | sent again |
+
+Failed attempts do **not** block retry. Upsert by `delivery_key`. Malformed history fails loudly.
+
+Do **not** rely only on `latest.json` (that broke multi-period dedupe).
+
+## Dashboard alerts vs owner email
+
+| Concept | Role |
+|---|---|
+| `all_dashboard_alerts` | Full diagnostic set in JSON + dashboard |
+| `owner_delivery_alerts` | Curated subset for email |
+
+Email policy (presentation only — does not change Phase 3 classifiers):
+
+- Show all **new** critical/high, **worsened** high, critical while active
+- High unchanged ongoing → suppress; reminder every **3** comparable snapshots
+- Medium: max **3**; new/worsened/reminder every **7** snapshots
+- Low/info: never listed individually — count only
+- Funnel warnings: grouped into lower-priority count
+- Product data: one aggregated line
+- Max **3** today’s actions
+- Resolved: optional one-line count, not a list
+
+Worsening (owner notification only): monetary ≥20% worse where direction matters; margin ≥3pp; entity status escalations (`watch`→`spend_no_purchase`→`high_priority_spend_no_purchase`, `relatively_weak_cpa`→`high_cpa`).
+
+## Resend integration
+
+**Reused existing flow** from weekly low-stock alerts:
+
+| Item | Value |
+|---|---|
+| Implementation | `src/email/resend.js` (extracted from `src/scripts/low-stock-alert.js`) |
+| Transport | `fetch` → `https://api.resend.com/emails` |
+| npm package | **None** (no `resend` dependency; same as low-stock) |
+| Secret | `RESEND_API_KEY` (existing) |
+| Recipients | `REPORT_EMAIL_TO` with fallback to `LOW_STOCK_EMAIL_TO` |
+| From | `REPORT_EMAIL_FROM` with fallback to `LOW_STOCK_EMAIL_FROM` |
+
+Low-stock still supports optional SMTP; Phase 4 daily email uses **Resend only** (no Nodemailer).
+
+Adapters: `console` · `file` · `webhook` · `resend`
+
+Local preview without sending:
+
+```bash
+REPORT_DELIVERY_ENABLED=true REPORT_DELIVERY_CHANNEL=file npm run reports:daily -- --days=7
+```
+
+## GitHub Actions
+
+Workflow: `.github/workflows/daily-report.yml`
+
+| Concern | Behavior |
+|---|---|
+| Schedule | `cron: "0 4 * * *"` → **04:00 UTC = 09:00 Asia/Karachi** |
+| Manual | `workflow_dispatch` with `days`, `date`, `send_email` |
+| Scheduled email | **enabled** (`REPORT_DELIVERY_CHANNEL=resend`) |
+| Manual email | **disabled** unless `send_email=true` |
+| Concurrency | `wear-active-daily-report` / `cancel-in-progress: false` |
+| Artifacts | upload reports + state, retention 30 days |
+| No git commits | generated reports are never committed back |
+
+### Operational state across ephemeral runners
+
+GitHub runners start empty. State is restored/persisted via **Actions cache**:
+
+- Restore `reports/state` (`actions/cache/restore` + `restore-keys: wa-ops-state-`)
+- Unpack into `snapshots/history.jsonl`, `delivery/history.jsonl`, recent `alerts/*d.json`
+- After the run, pack and `actions/cache/save` under `wa-ops-state-${{ github.run_id }}`
+
+Also uploaded as artifacts for humans. **Do not** commit daily state to git.
+
+Required secrets (reuse existing names): `RESEND_API_KEY`, `META_*`, `SHOPIFY_*`, `GOOGLE_SERVICE_ACCOUNT_JSON`, `GOOGLE_SHEETS_SPREADSHEET_ID`, plus `REPORT_EMAIL_TO` / `REPORT_EMAIL_FROM` (or low-stock email secrets as fallback).
 
 ## Snapshot schema
 
-Module: `src/operations/snapshot.js`  
-`schema_version: 1`
-
-Compact KPI only — not the full dashboard JSON. Key fields:
-
-- `reporting_date`, `timezone`, `period.{since,until,days,current_day_incomplete}`
-- `snapshot_key = \`${reporting_date}:${period.days}\``
-- `business`, `advertising_affordability`, `shopify`, `meta`, `sales_mix`, `accounting`, `decisions`, `confidence`
-
-Validation rejects malformed rows before history write.
+Module: `src/operations/snapshot.js` — `schema_version: 1` compact KPI only.
 
 ## History
 
-File: `reports/snapshots/history.jsonl` (append/upsert, atomic rewrite)
-
-- One record per `snapshot_key` (`date:days`)
-- Same key replaces (idempotent)
-- Chronological sort
-- Empty file / trailing newline OK
-- Malformed JSON → **loud failure** (never silently discarded)
-
-Helpers: `loadHistory`, `upsertSnapshot`, `writeHistory`, `getPreviousSnapshot`, `getRecentSnapshots`
-
-### Recovery if history is malformed
-
-1. Copy `reports/snapshots/history.jsonl` aside  
-2. Identify the bad line number from the error  
-3. Fix or remove that line  
-4. Optionally rebuild from dated `reports/snapshots/YYYY-MM-DD.json` files  
-5. Re-run `npm run reports:daily -- --no-delivery`
+`reports/snapshots/history.jsonl` — upsert by `snapshot_key`, atomic rewrite, fail loud on malformed JSON.
 
 ## Trends
 
-Module: `src/operations/trends.js`
-
-- Day-over-day only when a **comparable** prior snapshot exists  
-- Comparable ⇒ same `period.days`  
-- 7d vs 30d → `not_comparable` (no fake deltas)  
-- Wording: “vs previous comparable snapshot” — not definitive causal claims  
-- Does **not** alter Phase 3 classifiers  
-
-## Daily brief
-
-Module: `src/operations/brief.js` — deterministic templates (no LLM).
-
-Outputs:
-
-- `reports/briefs/YYYY-MM-DD.txt` / `.json`
-- `reports/briefs/latest.txt` / `.json`
-
-JSON is structured for future Slack/email/WhatsApp adapters (`headline`, `sections`, `alerts`, `dashboard_path`).
-
-## Alerts
-
-Module: `src/operations/alerts.js`
-
-Deterministic, evidence-based. Prefer existing statuses/recommendations over invented thresholds.
-
-| Type | Trigger (summary) | Severity notes |
-|---|---|---|
-| Business unprofitable | `business_health = unprofitable` | high / critical |
-| Margin drop | comparable margin ↓ ≥ `margin_drop_pp` (default 5 pp) | medium / high |
-| Shopify negative contribution | `contribution_status = negative_contribution` | medium; **high** if ≥ 3 comparable runs |
-| Zero-purchase ads | existing `high_priority_spend_no_purchase` / `spend_no_purchase` | high / medium |
-| High CPA | existing `high_cpa` / `relatively_weak_cpa` | high / medium |
-| Funnel | `primary_weak_funnel` / borderline warnings | medium / low |
-| Accounting | ledger missing / recurring not posted / full_month_variance | medium; partial-period → **info only** |
-| Product data | aggregated SKU/cost issues | one alert, not per SKU |
-| Revenue concentration | `non_shopify_distortion_risk` | low / medium (context) |
-| Meta spend spike | ≥30% and abs ≥ 0.25× account CPA | medium |
-| CPA deterioration | ≥25% with ≥2 purchases | medium |
-| ROAS decline | supplemental only | low |
-
-### Alert thresholds (Phase 4 only)
-
-Configured in `src/operations/config.js` / env (`REPORT_ALERT_*`).  
-**Must not** change Phase 3 classifiers.
-
-### Lifecycle
-
-Compare to prior day’s alert IDs:
-
-- `new` · `ongoing` · `resolved`
-
-Resolved appear in JSON/dashboard (collapsed); usually omitted from delivered brief.
-
-### Attention summary
-
-Descriptive counts only — never a fake 0–100 score.
-
-## Delivery
-
-Module: `src/operations/delivery.js`
-
-| Env | Default |
-|---|---|
-| `REPORT_DELIVERY_ENABLED` | `false` |
-| `REPORT_DELIVERY_CHANNEL` | `console` |
-| `REPORT_DELIVERY_WEBHOOK_URL` | empty |
-
-Adapters: `console`, `file`, `webhook` (optional email/Slack later via payload shape).
-
-Safety:
-
-- `--no-delivery` overrides env  
-- Delivery key `daily-report:YYYY-MM-DD:days` — no re-send unless `--force-delivery`  
-- Backfill never delivers unless `--deliver`  
-- Webhook: short timeout, max 2 attempts, redacted URL in logs/audit  
-- Generation success + required delivery failure → **nonzero exit**; artifacts kept  
-- Delivery disabled → success  
-
-Audit: `reports/delivery/YYYY-MM-DD.json` (+ `latest.json`) — no secrets.
-
-Delivered brief prioritizes critical/high + max 5 medium; low count only.
-
-## Dashboard extensions
-
-Overview adds:
-
-- **Trends** table (current / previous / change)  
-- **Daily Alerts** by severity + NEW/ONGOING lifecycle  
-
-No chart libraries. Empty history shows a short placeholder.
-
-## Output files
-
-```text
-reports/
-  dashboard/index.html
-  dashboard/report-YYYY-MM-DD-to-YYYY-MM-DD.html
-  snapshots/YYYY-MM-DD.json
-  snapshots/history.jsonl
-  briefs/YYYY-MM-DD.txt|.json + latest.*
-  alerts/YYYY-MM-DD.json + latest.json
-  delivery/YYYY-MM-DD.json + latest.json
-```
-
-Generated outputs are **gitignored** (`.gitkeep` only).
-
-## Current-day caveat
-
-When `period.until === reporting_date`, `period.current_day_incomplete = true`.
-
-Brief/dashboard note: *Today's Meta and order activity may still be incomplete.*
+Comparable only when `period.days` matches.
 
 ## Backfill
 
@@ -206,38 +169,7 @@ Brief/dashboard note: *Today's Meta and order activity may still be incomplete.*
 npm run reports:backfill -- --since=2026-08-15 --until=2026-09-05 --days=7
 ```
 
-- Same trailing window per date  
-- No external delivery by default  
-- Max 90 days unless `--force`  
-- Idempotent on `snapshot_key`  
-
-## Scheduling
-
-Do **not** run a custom daemon. Prefer host cron:
-
-```cron
-0 9 * * * cd /path/to/wear-active-shopify-ai && /usr/bin/env npm run reports:daily >> reports/daily.log 2>&1
-```
-
-Helper: `scripts/run-daily-report.sh`  
-Recommended local time: **09:00 Asia/Karachi** (host TZ dependent).  
-Logic is not hard-coded to 09:00.
-
-### GitHub Actions (optional, not required)
-
-Not shipped as a merge blocker. To add later:
-
-- Store Meta / Google / Shopify credentials as repository secrets  
-- `workflow_dispatch` + cron `0 4 * * *` (09:00 PKT ≈ 04:00 UTC while PKT = UTC+5)  
-- Upload `reports/**` as artifacts  
-- **Do not** commit generated reports back to `main`  
-
-## CLI
-
-Daily: `--date` `--days` `--dry-run` `--no-delivery` `--force-delivery` `--json`  
-Backfill: `--since` `--until` `--days` `--force` `--briefs` / `--no-briefs` `--deliver`  
-
-Unknown args and invalid dates fail loudly.
+Never emails unless explicitly `--deliver`.
 
 ## Tests
 
@@ -249,19 +181,15 @@ npm run profitability:test
 npm run meta:test
 ```
 
-## Attribution / read-only guarantees
+## Safety
 
-- No order-level attribution claims  
-- Shopify contribution remains **date-aligned**, not attributed  
-- Business affordability remains **whole-business**  
-- Meta spend never double-deducted  
 - No Meta / Shopify / Sheets writes from the daily pipeline  
-- No automatic ad pause/scale, product decisions, or accounting corrections  
-- No LLM-generated recommendations  
-- Secrets never written into report artifacts  
+- Resend email is the only production external side effect when enabled  
+- Secrets never written to report artifacts  
+- Delivery failure does not delete generated reports; enabled delivery failure → nonzero exit  
 
-## Related docs
+## Related
 
+- [LOW-STOCK-ALERTS.md](./LOW-STOCK-ALERTS.md) — original Resend pattern  
 - [UNIFIED_REPORTING_DASHBOARD.md](./UNIFIED_REPORTING_DASHBOARD.md)  
 - [PHASE_3_5_REPORTING.md](./PHASE_3_5_REPORTING.md)  
-- [PROFITABILITY_REPORTING.md](./PROFITABILITY_REPORTING.md)  

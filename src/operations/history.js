@@ -5,13 +5,10 @@
 const path = require("path");
 const { atomicWriteFile, readTextIfExists, reportsRoot, ensureDir } = require("./files");
 const { validateSnapshot } = require("./snapshot");
+const { snapshotDatedPath } = require("./paths");
 
 function historyPath(cwd = process.cwd()) {
   return path.join(reportsRoot(cwd), "snapshots", "history.jsonl");
-}
-
-function snapshotDatedPath(reportingDate, cwd = process.cwd()) {
-  return path.join(reportsRoot(cwd), "snapshots", `${reportingDate}.json`);
 }
 
 function parseHistoryText(text) {
@@ -74,7 +71,7 @@ function writeHistory(history, cwd = process.cwd()) {
 function writeDatedSnapshot(snapshot, cwd = process.cwd()) {
   validateSnapshot(snapshot);
   atomicWriteFile(
-    snapshotDatedPath(snapshot.reporting_date, cwd),
+    snapshotDatedPath(snapshot.reporting_date, snapshot.period.days, cwd),
     JSON.stringify(snapshot, null, 2) + "\n"
   );
 }

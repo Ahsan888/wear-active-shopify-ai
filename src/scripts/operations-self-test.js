@@ -33,12 +33,35 @@ const {
   buildDeliveryPayload,
   deliveryKey,
 } = require("../operations/delivery");
+const {
+  loadDeliveryHistory,
+  parseDeliveryHistoryText,
+  upsertDeliveryRecord,
+  writeDeliveryHistory,
+  wasAlreadyDelivered,
+} = require("../operations/deliveryHistory");
+const {
+  snapshotDatedPath,
+  briefDatedPaths,
+  alertsDatedPath,
+  deliveryAuditPath,
+  datedPeriodBase,
+} = require("../operations/paths");
+const {
+  selectOwnerDeliveryAlerts,
+  buildOwnerEmailContent,
+  classifyOwnerNotification,
+} = require("../operations/ownerEmail");
+const { sendViaResend, redactEmail } = require("../email/resend");
 const { loadOperationsConfig, DEFAULTS } = require("../operations/config");
 const { parseDailyArgs } = require("../operations/daily");
 const { parseBackfillArgs } = require("../operations/backfill");
 const { trailingWindow, todayYmd } = require("../operations/dates");
 const { renderUnifiedDashboard } = require("../dashboard/html");
 const { escapeHtml } = require("../dashboard/format");
+const { atomicWriteFile } = require("../operations/files");
+const fsYaml = require("fs");
+const pathYaml = require("path");
 
 let passed = 0;
 let failed = 0;
@@ -1117,7 +1140,535 @@ test("todayYmd returns YYYY-MM-DD", () => {
   assert.ok(/^\d{4}-\d{2}-\d{2}$/.test(todayYmd()));
 });
 
-runAsyncTests().then(() => {
+// ——— Period-specific artifacts ———
+test("61. 7d snapshot path includes -7d", () => {
+  assert.ok(snapshotDatedPath("2026-09-06", 7).endsWith("2026-09-06-7d.json"));
+});
+
+test("62. 30d snapshot path includes -30d", () => {
+  assert.ok(snapshotDatedPath("2026-09-06", 30).endsWith("2026-09-06-30d.json"));
+});
+
+test("63-66. 7d and 30d artifact paths coexist", () => {
+  assert.notStrictEqual(
+    snapshotDatedPath("2026-09-06", 7),
+    snapshotDatedPath("2026-09-06", 30)
+  );
+  assert.notStrictEqual(
+    briefDatedPaths("2026-09-06", 7).txt,
+    briefDatedPaths("2026-09-06", 30).txt
+  );
+  assert.notStrictEqual(
+    alertsDatedPath("2026-09-06", 7),
+    alertsDatedPath("2026-09-06", 30)
+  );
+  assert.notStrictEqual(
+    deliveryAuditPath("2026-09-06", 7),
+    deliveryAuditPath("2026-09-06", 30)
+  );
+});
+
+test("67. alert lifecycle is period-specific", () => {
+  const snap7 = makeSnapshot("2026-09-06", 7);
+  const snap30 = makeSnapshot("2026-09-06", 30);
+  const prev7Alerts = [
+    {
+      id: "shopify:negative_contribution",
+      status: "active",
+      severity: "medium",
+      lifecycle: "new",
+      first_seen: "2026-09-05",
+    },
+  ];
+  const r7 = evaluateAlerts({
+    bundle: baseBundle(),
+    snapshot: snap7,
+    history: [makeSnapshot("2026-09-05", 7)],
+    previousAlerts: prev7Alerts,
+    config,
+  });
+  const r30 = evaluateAlerts({
+    bundle: baseBundle(),
+    snapshot: snap30,
+    history: [],
+    previousAlerts: [], // 30d must not inherit 7d previous
+    config,
+  });
+  const a7 = r7.alerts.find((a) => a.id === "shopify:negative_contribution");
+  const a30 = r30.alerts.find((a) => a.id === "shopify:negative_contribution");
+  assert.strictEqual(a7.lifecycle, "ongoing");
+  assert.strictEqual(a30.lifecycle, "new");
+});
+
+test("68. latest aliases path helpers still period-dated", () => {
+  assert.strictEqual(datedPeriodBase("2026-09-06", 7), "2026-09-06-7d");
+});
+
+test("69. history stores both composite keys", () => {
+  const h = upsertSnapshot(
+    upsertSnapshot([], makeSnapshot("2026-09-06", 7)),
+    makeSnapshot("2026-09-06", 30)
+  );
+  assert.strictEqual(h.length, 2);
+  assert.ok(h.some((s) => s.snapshot_key === "2026-09-06:7"));
+  assert.ok(h.some((s) => s.snapshot_key === "2026-09-06:30"));
+});
+
+test("70. malformed delivery history fails loudly", () => {
+  assert.throws(() => parseDeliveryHistoryText("NOT_JSON\n"), /Malformed/);
+});
+
+test("71. delivery history upsert by key", () => {
+  const a = {
+    delivery_key: "daily-report:2026-09-06:7",
+    reporting_date: "2026-09-06",
+    days: 7,
+    channel: "console",
+    attempted: true,
+    success: false,
+  };
+  const b = { ...a, success: true };
+  const h = upsertDeliveryRecord(upsertDeliveryRecord([], a), b);
+  assert.strictEqual(h.length, 1);
+  assert.strictEqual(h[0].success, true);
+});
+
+test("72. owner email suppresses low/info individually", () => {
+  const snap = makeSnapshot("2026-09-06");
+  const alertsResult = evaluateAlerts({
+    bundle: baseBundle(),
+    snapshot: snap,
+    history: [],
+    previousAlerts: [],
+    config,
+  });
+  const curated = selectOwnerDeliveryAlerts({
+    alerts: alertsResult.alerts,
+    previousAlerts: [],
+    snapshot: snap,
+    history: [],
+    policy: DEFAULTS.owner_email
+      ? {
+          high_reminder_every: 3,
+          medium_reminder_every: 7,
+          max_medium: 3,
+          max_actions: 3,
+          money_worsen_pct: 20,
+          margin_worsen_pp: 3,
+        }
+      : undefined,
+  });
+  assert.ok(
+    !curated.owner_alerts.some(
+      (a) => a.severity === "low" || a.severity === "info"
+    )
+  );
+  assert.ok(curated.lower_priority_count >= 1);
+});
+
+test("73. owner email max 3 medium", () => {
+  const snap = makeSnapshot("2026-09-06");
+  const fake = [];
+  for (let i = 0; i < 6; i += 1) {
+    fake.push({
+      id: `acct:m${i}`,
+      severity: "medium",
+      status: "active",
+      lifecycle: "new",
+      title: `M${i}`,
+      message: `medium ${i}`,
+      category: "accounting",
+    });
+  }
+  const curated = selectOwnerDeliveryAlerts({
+    alerts: fake,
+    previousAlerts: [],
+    snapshot: snap,
+    history: [],
+    policy: {
+      high_reminder_every: 3,
+      medium_reminder_every: 7,
+      max_medium: 3,
+      max_actions: 3,
+      money_worsen_pct: 20,
+      margin_worsen_pp: 3,
+    },
+  });
+  assert.ok(
+    curated.owner_alerts.filter((a) => a.severity === "medium").length <= 3
+  );
+});
+
+test("74. ongoing high suppressed until reminder", () => {
+  const snap = makeSnapshot("2026-09-06");
+  const alert = {
+    id: "shopify:negative_contribution",
+    severity: "high",
+    status: "active",
+    lifecycle: "ongoing",
+    title: "Shopify",
+    message: "neg",
+    current_value: -6000,
+  };
+  const prev = {
+    ...alert,
+    lifecycle: "new",
+    current_value: -6000,
+  };
+  const state = classifyOwnerNotification(alert, prev, 2, {
+    high_reminder_every: 3,
+    medium_reminder_every: 7,
+    max_medium: 3,
+    max_actions: 3,
+    money_worsen_pct: 20,
+    margin_worsen_pp: 3,
+  });
+  assert.strictEqual(state, "suppressed");
+  const rem = classifyOwnerNotification(alert, prev, 3, {
+    high_reminder_every: 3,
+    medium_reminder_every: 7,
+    max_medium: 3,
+    max_actions: 3,
+    money_worsen_pct: 20,
+    margin_worsen_pp: 3,
+  });
+  assert.strictEqual(rem, "reminder");
+});
+
+test("75. funnel warnings grouped not listed", () => {
+  const snap = makeSnapshot("2026-09-06");
+  const alerts = [
+    {
+      id: "meta-ad:1:funnel_warning",
+      category: "ads",
+      severity: "low",
+      status: "active",
+      lifecycle: "new",
+      title: "Funnel",
+      message: "a",
+    },
+    {
+      id: "meta-ad:2:funnel_warning",
+      category: "ads",
+      severity: "low",
+      status: "active",
+      lifecycle: "new",
+      title: "Funnel",
+      message: "b",
+    },
+    {
+      id: "meta-ad:3:funnel_warning",
+      category: "ads",
+      severity: "low",
+      status: "active",
+      lifecycle: "new",
+      title: "Funnel",
+      message: "c",
+    },
+  ];
+  const curated = selectOwnerDeliveryAlerts({
+    alerts,
+    previousAlerts: [],
+    snapshot: snap,
+    history: [],
+    policy: {
+      high_reminder_every: 3,
+      medium_reminder_every: 7,
+      max_medium: 3,
+      max_actions: 3,
+      money_worsen_pct: 20,
+      margin_worsen_pp: 3,
+    },
+  });
+  assert.ok(!curated.owner_alerts.some((a) => a.id.includes("funnel")));
+  assert.strictEqual(curated.lower_priority_count, 3);
+});
+
+test("76. owner email content has subject text html", () => {
+  const snap = makeSnapshot("2026-09-06");
+  const alertsResult = evaluateAlerts({
+    bundle: baseBundle(),
+    snapshot: snap,
+    history: [],
+    previousAlerts: [],
+    config,
+  });
+  const email = buildOwnerEmailContent({
+    snapshot: snap,
+    brief: { text: "x", json: {} },
+    alertsResult,
+    previousAlerts: [],
+    history: [],
+    bundle: baseBundle(),
+    dashboard_path: "reports/dashboard/index.html",
+    days: 7,
+  });
+  assert.ok(email.subject.includes("Wear Active Daily"));
+  assert.ok(email.text.includes("WEAR ACTIVE DAILY"));
+  assert.ok(email.html.includes("<table"));
+  assert.ok(!email.html.includes("RESEND_API_KEY"));
+  assert.ok(email.top_actions.length <= 3);
+});
+
+test("77. redact email", () => {
+  assert.strictEqual(redactEmail("owner@wearactive.com"), "o***@wearactive.com");
+});
+
+test("78. workflow file has schedule and concurrency", () => {
+  const yml = fsYaml.readFileSync(
+    pathYaml.join(__dirname, "../../.github/workflows/daily-report.yml"),
+    "utf8"
+  );
+  assert.ok(yml.includes('cron: "0 4 * * *"'));
+  assert.ok(yml.includes("workflow_dispatch"));
+  assert.ok(yml.includes("wear-active-daily-report"));
+  assert.ok(yml.includes("actions/cache/restore"));
+  assert.ok(yml.includes("actions/upload-artifact"));
+  assert.ok(yml.includes("send_email"));
+  assert.ok(yml.includes("REPORT_DELIVERY_CHANNEL: resend"));
+});
+
+test("79. no resend npm package dependency", () => {
+  const pkg = JSON.parse(
+    fsYaml.readFileSync(pathYaml.join(__dirname, "../../package.json"), "utf8")
+  );
+  assert.ok(!pkg.dependencies?.resend);
+  assert.ok(!pkg.devDependencies?.resend);
+});
+
+test("80. shared resend helper exists", () => {
+  assert.strictEqual(typeof sendViaResend, "function");
+});
+
+runAsyncTests().then(async () => {
+  // Extended async delivery / resend tests
+  await test("81. 7d then 30d then 7d dedupe", async () => {
+    const cwd = tmpCwd();
+    const snap7 = makeSnapshot("2026-09-06", 7);
+    const snap30 = makeSnapshot("2026-09-06", 30);
+    const alertsResult = evaluateAlerts({
+      bundle: baseBundle(),
+      snapshot: snap7,
+      history: [],
+      previousAlerts: [],
+      config,
+    });
+    const brief = {
+      text: "t",
+      json: {},
+    };
+    const baseArgs = (snap, days) => ({
+      reporting_date: "2026-09-06",
+      brief,
+      alertsResult,
+      snapshot: snap,
+      dashboard_path: "x",
+      days,
+      bundle: baseBundle(),
+      previousAlerts: [],
+      history: [],
+    });
+    const cfg = {
+      ...config,
+      delivery_enabled: true,
+      delivery_channel: "console",
+    };
+    const a = await deliverDailyReport(baseArgs(snap7, 7), cfg, { cwd });
+    assert.ok(a.audit.success && !a.skipped);
+    const b = await deliverDailyReport(baseArgs(snap30, 30), cfg, { cwd });
+    assert.ok(b.audit.success && !b.skipped);
+    const c = await deliverDailyReport(baseArgs(snap7, 7), cfg, { cwd });
+    assert.strictEqual(c.skipped, "already_delivered");
+    const d = await deliverDailyReport(baseArgs(snap7, 7), cfg, {
+      cwd,
+      force: true,
+    });
+    assert.ok(d.audit.success && !d.skipped);
+    assert.ok(
+      wasAlreadyDelivered(deliveryKey("2026-09-06", 7), cwd)
+    );
+    assert.ok(
+      wasAlreadyDelivered(deliveryKey("2026-09-06", 30), cwd)
+    );
+  });
+
+  await test("82. failed delivery may retry", async () => {
+    const cwd = tmpCwd();
+    const key = deliveryKey("2026-09-06", 7);
+    writeDeliveryHistory(
+      [
+        {
+          delivery_key: key,
+          reporting_date: "2026-09-06",
+          days: 7,
+          channel: "resend",
+          attempted: true,
+          success: false,
+          error_code: "resend_http_500",
+        },
+      ],
+      cwd
+    );
+    assert.strictEqual(wasAlreadyDelivered(key, cwd), false);
+  });
+
+  await test("83. resend channel mock success", async () => {
+    const cwd = tmpCwd();
+    const snap = makeSnapshot("2026-09-06");
+    const alertsResult = evaluateAlerts({
+      bundle: baseBundle(),
+      snapshot: snap,
+      history: [],
+      previousAlerts: [],
+      config,
+    });
+    let called = false;
+    const fetchImpl = async () => {
+      called = true;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ id: "msg_test_1" }),
+      };
+    };
+    const result = await deliverDailyReport(
+      {
+        reporting_date: "2026-09-06",
+        brief: { text: "t", json: {} },
+        alertsResult,
+        snapshot: snap,
+        dashboard_path: "x",
+        days: 7,
+        bundle: baseBundle(),
+      },
+      {
+        ...config,
+        delivery_enabled: true,
+        delivery_channel: "resend",
+        email_to: "owner@example.com",
+        email_from: "Wear Active <alerts@example.com>",
+        resend_api_key: "re_test",
+      },
+      { cwd, fetchImpl }
+    );
+    assert.ok(called);
+    assert.ok(result.audit.success);
+    assert.strictEqual(result.audit.resend_message_id, "msg_test_1");
+    assert.ok(result.audit.recipient_redacted.includes("***"));
+    assert.ok(!JSON.stringify(result.audit).includes("re_test"));
+    assert.ok(!JSON.stringify(result.payload).includes("re_test"));
+  });
+
+  await test("84. resend missing recipient fails", async () => {
+    const cwd = tmpCwd();
+    const snap = makeSnapshot("2026-09-06");
+    const alertsResult = evaluateAlerts({
+      bundle: baseBundle(),
+      snapshot: snap,
+      history: [],
+      previousAlerts: [],
+      config,
+    });
+    let threw = false;
+    try {
+      await deliverDailyReport(
+        {
+          reporting_date: "2026-09-07",
+          brief: { text: "t", json: {} },
+          alertsResult,
+          snapshot: snap,
+          dashboard_path: "x",
+          days: 7,
+          bundle: baseBundle(),
+        },
+        {
+          ...config,
+          delivery_enabled: true,
+          delivery_channel: "resend",
+          email_to: "",
+          email_from: "from@example.com",
+          resend_api_key: "re_test",
+        },
+        { cwd, fetchImpl: async () => ({ ok: true, status: 200, text: async () => "{}" }) }
+      );
+    } catch (err) {
+      threw = true;
+      assert.ok(/resend_to_missing|to_missing/.test(err.message));
+    }
+    assert.ok(threw);
+  });
+
+  await test("85. delivery disabled does not call resend", async () => {
+    const cwd = tmpCwd();
+    let called = false;
+    const snap = makeSnapshot("2026-09-06");
+    const alertsResult = evaluateAlerts({
+      bundle: baseBundle(),
+      snapshot: snap,
+      history: [],
+      previousAlerts: [],
+      config,
+    });
+    await deliverDailyReport(
+      {
+        reporting_date: "2026-09-08",
+        brief: { text: "t", json: {} },
+        alertsResult,
+        snapshot: snap,
+        dashboard_path: "x",
+        days: 7,
+        bundle: baseBundle(),
+      },
+      {
+        ...config,
+        delivery_enabled: false,
+        delivery_channel: "resend",
+        email_to: "a@b.com",
+        email_from: "f@b.com",
+        resend_api_key: "re_test",
+      },
+      {
+        cwd,
+        fetchImpl: async () => {
+          called = true;
+          return { ok: true, status: 200, text: async () => "{}" };
+        },
+      }
+    );
+    assert.strictEqual(called, false);
+  });
+
+  await test("86. write period-specific audit files", async () => {
+    const cwd = tmpCwd();
+    const snap = makeSnapshot("2026-09-06", 7);
+    const alertsResult = evaluateAlerts({
+      bundle: baseBundle(),
+      snapshot: snap,
+      history: [],
+      previousAlerts: [],
+      config,
+    });
+    await deliverDailyReport(
+      {
+        reporting_date: "2026-09-06",
+        brief: { text: "t", json: {} },
+        alertsResult,
+        snapshot: snap,
+        dashboard_path: "x",
+        days: 7,
+        bundle: baseBundle(),
+      },
+      { ...config, delivery_enabled: true, delivery_channel: "file" },
+      { cwd }
+    );
+    assert.ok(
+      fs.existsSync(deliveryAuditPath("2026-09-06", 7, cwd))
+    );
+  });
+
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed) process.exitCode = 1;
 });
+
+// prevent double finalizer from old code
+void 0;

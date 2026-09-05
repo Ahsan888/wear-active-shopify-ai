@@ -9,6 +9,8 @@ const DEFAULTS = {
   delivery_enabled: false,
   delivery_channel: "console",
   delivery_webhook_url: "",
+  email_to: "",
+  email_from: "",
   alerts: {
     margin_drop_pp: 5,
     negative_shopify_persistence_runs: 3,
@@ -16,7 +18,11 @@ const DEFAULTS = {
     meta_spend_spike_min_account_cpa_multiple: 0.25,
     meta_cpa_deterioration_pct: 25,
     meta_cpa_min_purchases: 2,
-    max_medium_delivery_alerts: 5,
+    max_medium_delivery_alerts: 3,
+  },
+  owner_email: {
+    high_reminder_every: 3,
+    medium_reminder_every: 7,
   },
 };
 
@@ -66,6 +72,18 @@ function loadOperationsConfig(overrides = {}) {
     ),
   };
 
+  const owner_email = {
+    ...DEFAULTS.owner_email,
+    high_reminder_every: envNum(
+      "REPORT_ALERT_HIGH_REMINDER_EVERY",
+      DEFAULTS.owner_email.high_reminder_every
+    ),
+    medium_reminder_every: envNum(
+      "REPORT_ALERT_MEDIUM_REMINDER_EVERY",
+      DEFAULTS.owner_email.medium_reminder_every
+    ),
+  };
+
   return {
     timezone: process.env.REPORT_TIMEZONE || DEFAULTS.timezone,
     daily_days: envNum("REPORT_DAILY_DAYS", DEFAULTS.daily_days),
@@ -80,9 +98,21 @@ function loadOperationsConfig(overrides = {}) {
     delivery_channel:
       process.env.REPORT_DELIVERY_CHANNEL || DEFAULTS.delivery_channel,
     delivery_webhook_url: process.env.REPORT_DELIVERY_WEBHOOK_URL || "",
+    // Prefer REPORT_EMAIL_*; fall back to existing low-stock Resend recipients
+    email_to:
+      process.env.REPORT_EMAIL_TO ||
+      process.env.LOW_STOCK_EMAIL_TO ||
+      "",
+    email_from:
+      process.env.REPORT_EMAIL_FROM ||
+      process.env.LOW_STOCK_EMAIL_FROM ||
+      "",
+    resend_api_key: process.env.RESEND_API_KEY || "",
     alerts,
+    owner_email,
     ...overrides,
     alerts: { ...alerts, ...(overrides.alerts || {}) },
+    owner_email: { ...owner_email, ...(overrides.owner_email || {}) },
   };
 }
 

@@ -30,6 +30,8 @@ reports/alerts/**
 !reports/alerts/.gitkeep
 reports/delivery/**
 !reports/delivery/.gitkeep
+reports/state/**
+!reports/state/.gitkeep
 reports/daily.log
 
 # OS / editor noise

@@ -11,7 +11,7 @@ const {
 } = require("../dashboard/bundle");
 const { renderUnifiedDashboard } = require("../dashboard/html");
 const { loadOperationsConfig } = require("./config");
-const { trailingWindow, todayYmd, assertYmd, formatDisplayDate } = require("./dates");
+const { trailingWindow, todayYmd, assertYmd } = require("./dates");
 const { buildSnapshotFromBundle } = require("./snapshot");
 const {
   loadHistory,
@@ -30,7 +30,8 @@ const {
   readTextIfExists,
   ensureDir,
 } = require("./files");
-const { formatMoney, formatPct, formatRoas, formatNumber } = require("../meta/metrics");
+const { briefDatedPaths, alertsDatedPath } = require("./paths");
+const { formatMoney } = require("../meta/metrics");
 
 function parseDailyArgs(argv) {
   const out = {
@@ -84,22 +85,8 @@ function parseDailyArgs(argv) {
   return out;
 }
 
-function loadPreviousAlerts(reportingDate, cwd) {
-  const dated = path.join(reportsRoot(cwd), "alerts", `${reportingDate}.json`);
-  // Prefer prior day's file for lifecycle — caller may pass previous from history
-  const latest = path.join(reportsRoot(cwd), "alerts", "latest.json");
-  const text = readTextIfExists(dated) || readTextIfExists(latest);
-  if (!text) return [];
-  try {
-    const j = JSON.parse(text);
-    return j.alerts || [];
-  } catch {
-    return [];
-  }
-}
-
-function loadAlertsForDate(reportingDate, cwd) {
-  const p = path.join(reportsRoot(cwd), "alerts", `${reportingDate}.json`);
+function loadAlertsForDate(reportingDate, days, cwd) {
+  const p = alertsDatedPath(reportingDate, days, cwd);
   const text = readTextIfExists(p);
   if (!text) return [];
   try {
@@ -153,8 +140,8 @@ async function runDailyReport(options = {}) {
 
   const prevDate = previousReportingDateFromHistory(history, snapshot);
   const previousAlerts = prevDate
-    ? loadAlertsForDate(prevDate, cwd)
-    : loadPreviousAlerts(reporting_date, cwd);
+    ? loadAlertsForDate(prevDate, days, cwd)
+    : [];
 
   // Stage: alerts
   const alertsResult = evaluateAlerts({
@@ -174,6 +161,7 @@ async function runDailyReport(options = {}) {
       alerts: alertsResult.alerts,
       attention_summary: alertsResult.attention_summary,
       reporting_date,
+      days,
     },
   });
 
@@ -202,6 +190,9 @@ async function runDailyReport(options = {}) {
   let delivery = null;
   let deliveryError = null;
 
+  const loadAlertsFn = (d, periodDays) =>
+    loadAlertsForDate(d, periodDays || days, cwd);
+
   if (!dryRun) {
     // Persist artifacts
     writeDatedSnapshot(snapshot, cwd);
@@ -213,13 +204,11 @@ async function runDailyReport(options = {}) {
     atomicWriteFile(dashboard_path, html);
     atomicWriteFile(datedDashboard, html);
 
+    const briefPaths = briefDatedPaths(reporting_date, days, cwd);
     const briefDir = path.join(reportsRoot(cwd), "briefs");
+    atomicWriteFile(briefPaths.txt, brief.text + "\n");
     atomicWriteFile(
-      path.join(briefDir, `${reporting_date}.txt`),
-      brief.text + "\n"
-    );
-    atomicWriteFile(
-      path.join(briefDir, `${reporting_date}.json`),
+      briefPaths.json,
       JSON.stringify(brief.json, null, 2) + "\n"
     );
     atomicWriteFile(path.join(briefDir, "latest.txt"), brief.text + "\n");
@@ -230,17 +219,17 @@ async function runDailyReport(options = {}) {
 
     const alertDoc = {
       reporting_date,
+      days,
       generated_at: alertsResult.generated_at,
       attention_summary: alertsResult.attention_summary,
       alerts: alertsResult.alerts,
     };
-    const alertDir = path.join(reportsRoot(cwd), "alerts");
     atomicWriteFile(
-      path.join(alertDir, `${reporting_date}.json`),
+      alertsDatedPath(reporting_date, days, cwd),
       JSON.stringify(alertDoc, null, 2) + "\n"
     );
     atomicWriteFile(
-      path.join(alertDir, "latest.json"),
+      path.join(reportsRoot(cwd), "alerts", "latest.json"),
       JSON.stringify(alertDoc, null, 2) + "\n"
     );
 
@@ -254,6 +243,10 @@ async function runDailyReport(options = {}) {
           snapshot,
           dashboard_path: "reports/dashboard/index.html",
           days,
+          previousAlerts,
+          history: nextHistory,
+          loadAlertsFn,
+          bundle: baseBundle,
         },
         { ...config, delivery_enabled: deliveryEnabled },
         { force: forceDelivery, cwd }
@@ -262,11 +255,30 @@ async function runDailyReport(options = {}) {
       deliveryError = err;
       delivery = { audit: err.audit || null };
     }
+  } else {
+    // Dry-run: still build delivery payload preview without writing
+    delivery = {
+      payload: require("./delivery").buildDeliveryPayload({
+        reporting_date,
+        brief,
+        alertsResult,
+        snapshot,
+        dashboard_path: "reports/dashboard/index.html",
+        days,
+        previousAlerts,
+        history,
+        loadAlertsFn,
+        bundle: baseBundle,
+        config,
+      }),
+      skipped: "dry-run",
+    };
   }
 
   const summary = {
     title: "Wear Active Daily Reporting",
     reporting_date,
+    days,
     period,
     dry_run: dryRun,
     dashboard: dryRun ? "skipped (dry-run)" : "generated",
@@ -300,7 +312,9 @@ async function runDailyReport(options = {}) {
     operationalBundle,
     period,
     reporting_date,
+    days,
     dryRun,
+    previousAlerts,
   };
 }
 
@@ -309,15 +323,14 @@ function printDailySummary(result) {
   const cur = "PKR";
   console.log("Wear Active Daily Reporting");
   console.log(`Date: ${s.reporting_date}`);
+  console.log(`Days: ${s.days}`);
   console.log(`Dashboard: ${s.dashboard}`);
   console.log(`Snapshot: ${s.snapshot}`);
   console.log(`Brief: ${s.brief}`);
   console.log(`Alerts: ${s.alerts_active} active`);
   console.log(`Delivery: ${s.delivery}`);
   console.log(`Business health: ${s.business_health}`);
-  console.log(
-    `Adjusted profit: ${formatMoney(s.adjusted_profit, cur)}`
-  );
+  console.log(`Adjusted profit: ${formatMoney(s.adjusted_profit, cur)}`);
   console.log(
     `Shopify contribution: ${formatMoney(s.shopify_contribution, cur)}`
   );
@@ -334,4 +347,6 @@ module.exports = {
   parseDailyArgs,
   runDailyReport,
   printDailySummary,
+  loadAlertsForDate,
+  previousReportingDateFromHistory,
 };
