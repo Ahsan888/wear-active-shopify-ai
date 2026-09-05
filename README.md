@@ -115,6 +115,8 @@ Local-only under the editor (gitignored): `input/`, `photos/`, `gpt_output/`,
 | `meta:test` | Pure-function tests for Meta metrics/CLI validation |
 | `reports:merge` | Conservative Meta (+ optional Shopify) merge stub |
 | `profitability:report` | Blended Meta + Books profitability (read-only) |
+| `decisions:report` | Decision intelligence advisory report (read-only) |
+| `decisions:test` | Pure-function tests for decision classifiers |
 | `profitability:test` | Pure-function tests for no-double-count / reconcile |
 
 Low-stock setup: [docs/LOW-STOCK-ALERTS.md](docs/LOW-STOCK-ALERTS.md).  
