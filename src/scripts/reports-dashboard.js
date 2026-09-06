@@ -136,6 +136,61 @@ async function main() {
     };
   }
 
+  // Phase 6 — customer & cohort economics (advisory only)
+  try {
+    const { addDaysYmd } = require("../operations/dates");
+    const { loadLedger } = require("../profitability/books");
+    const {
+      fetchOrdersForAttribution,
+    } = require("../attribution/fetchOrders");
+    const {
+      indexRecognizedShopifyOrderEconomics,
+    } = require("../attribution/ledgerJoin");
+    const { buildCustomerEconomics } = require("../customers/build");
+    const { assertNoRawPii } = require("../customers/identity");
+
+    const historyDays = Math.max(
+      180,
+      Number(process.env.CUSTOMER_HISTORY_DAYS) || 540
+    );
+    const history = {
+      since: addDaysYmd(dateRange.until, -(historyDays - 1)),
+      until: dateRange.until,
+    };
+    const maxPages = Math.max(
+      40,
+      Number(process.env.CUSTOMER_ORDER_MAX_PAGES) || 80
+    );
+
+    const [orders, ledger] = await Promise.all([
+      fetchOrdersForAttribution({ ...history, maxPages }),
+      loadLedger(),
+    ]);
+    const ledgerByOrderId = indexRecognizedShopifyOrderEconomics(
+      ledger.data,
+      ledger.header,
+      history.since,
+      history.until
+    );
+    const report = buildCustomerEconomics({
+      orders,
+      ledgerByOrderId,
+      period: dateRange,
+      history,
+      meta_spend_total: inputs.meta?.totals?.spend || 0,
+    });
+    // Trim embed size; never include raw PII
+    report.customers = (report.customers || []).slice(0, 100);
+    report.period_orders = (report.period_orders || []).slice(0, 200);
+    assertNoRawPii(JSON.stringify(report));
+    bundle.customers = report;
+  } catch (err) {
+    bundle.customers = {
+      error: String(err.message || err),
+      advisory_only: true,
+    };
+  }
+
   const html = renderUnifiedDashboard(bundle);
 
   const outDir = path.join(process.cwd(), "reports", "dashboard");

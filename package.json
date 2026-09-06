@@ -69,7 +69,9 @@
     "stock:low": "node src/scripts/low-stock-alert.js",
     "stock:low:send": "node src/scripts/low-stock-alert.js --send",
     "inventory:report": "node src/scripts/inventory-report.js",
-    "inventory:test": "node src/scripts/inventory-self-test.js"
+    "inventory:test": "node src/scripts/inventory-self-test.js",
+    "customers:report": "node src/scripts/customers-report.js",
+    "customers:test": "node src/scripts/customers-self-test.js"
   },
   "keywords": [
     "shopify",

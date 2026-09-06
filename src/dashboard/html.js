@@ -1261,6 +1261,177 @@ function renderInventory(ctx) {
 </div>`;
 }
 
+function renderCustomers(ctx) {
+  const cust = ctx.report?.customers;
+  if (!cust) {
+    return `<div id="view-customers" class="view">
+  <section>
+    <div class="divider-label">CUSTOMER &amp; COHORT ECONOMICS</div>
+    <h2>Customers</h2>
+    <p class="note">Not loaded for this report. Run <code>npm run customers:report</code> or regenerate the dashboard.</p>
+    <p class="note">Observed customer value only — not predictive LTV. No CRM/email actions.</p>
+  </section>
+</div>`;
+  }
+  if (cust.error) {
+    return `<div id="view-customers" class="view">
+  <section>
+    <div class="divider-label">CUSTOMER &amp; COHORT ECONOMICS</div>
+    <h2>Customers</h2>
+    <p class="note tone-bad">${escapeHtml(cust.error)}</p>
+  </section>
+</div>`;
+  }
+
+  const s = cust.summary || {};
+  const nv = cust.new_vs_returning || {};
+  const ov = cust.observed_customer_value || {};
+  const rp = cust.repurchase || {};
+  const cac = cust.observed_cac || {};
+  const warnList = (cust.data_quality?.warnings || [])
+    .map((w) => `<li>${escapeHtml(w)}</li>`)
+    .join("");
+
+  function bucketCards(label, b = {}) {
+    return `<section>
+    <h2>${escapeHtml(label)}</h2>
+    <div class="grid">
+      ${card("Orders", num(b.orders, 0))}
+      ${card("Revenue", money(b.revenue))}
+      ${card("GP", money(b.gross_profit))}
+      ${card("GM", b.gross_margin_pct == null ? "—" : pct(b.gross_margin_pct))}
+      ${card("AOV", money(b.aov))}
+      ${card("GP/order", money(b.gp_per_order))}
+    </div>
+  </section>`;
+  }
+
+  const cohortRows = (cust.cohorts || [])
+    .slice(-18)
+    .map((c) => {
+      const cell = (chk) =>
+        chk?.matured ? (chk.rate_pct == null ? "—" : pct(chk.rate_pct)) : "—";
+      return `<tr>
+      <td>${escapeHtml(c.cohort)}</td>
+      <td>${num(c.customers, 0)}</td>
+      <td>${money(c.revenue_per_customer)}</td>
+      <td>${money(c.gp_per_customer)}</td>
+      <td>${c.repeat_rate_pct == null ? "—" : pct(c.repeat_rate_pct)}</td>
+      <td>${cell(c.repeat_by_30d)}</td>
+      <td>${cell(c.repeat_by_60d)}</td>
+      <td>${cell(c.repeat_by_90d)}</td>
+    </tr>`;
+    })
+    .join("");
+
+  const acqRows = (cust.acquisition_cohorts || [])
+    .map(
+      (a) => `<tr>
+      <td>${escapeHtml(a.acquisition)}</td>
+      <td>${num(a.customers, 0)}</td>
+      <td>${money(a.revenue_per_customer)}</td>
+      <td>${money(a.gp_per_customer)}</td>
+      <td>${num(a.orders_per_customer, 2)}</td>
+      <td>${a.repeat_rate_pct == null ? "—" : pct(a.repeat_rate_pct)}</td>
+    </tr>`
+    )
+    .join("");
+
+  const topCust = (ov.top_customers || [])
+    .slice(0, 20)
+    .map(
+      (c) => `<tr>
+      <td><code>${escapeHtml(c.customer_key)}</code></td>
+      <td>${num(c.recognized_orders, 0)}</td>
+      <td>${money(c.lifetime_recognized_revenue)}</td>
+      <td>${money(c.lifetime_gp)}</td>
+      <td>${escapeHtml(c.first_order_date || "—")}</td>
+      <td>${escapeHtml(c.cohort_month || "—")}</td>
+      <td>${escapeHtml(c.first_order_acquisition || "—")}</td>
+    </tr>`
+    )
+    .join("");
+
+  return `<div id="view-customers" class="view">
+  <section>
+    <div class="divider-label">CUSTOMER &amp; COHORT ECONOMICS</div>
+    <h2>Customer Overview</h2>
+    <p class="note">Recognized Shopify + Ledger economics. Identity via Shopify customer ID (email hashed only if needed). Confidence: <strong>${escapeHtml(cust.confidence || "—")}</strong>.</p>
+    <div class="grid">
+      ${card("Identified customers", num(s.recognized_customers_identified, 0))}
+      ${card("New", num(s.new_customers, 0))}
+      ${card("Returning", num(s.returning_customers, 0))}
+      ${card("Guest/unknown", num(s.guest_unknown_customers, 0))}
+      ${card("Orders", num(s.recognized_orders, 0))}
+      ${card("Revenue", money(s.revenue))}
+      ${card("GP", money(s.gross_profit))}
+      ${card("Rev/customer", money(s.revenue_per_identified_customer))}
+      ${card("GP/customer", money(s.gp_per_identified_customer))}
+      ${card("Repeat customer rate", s.repeat_customer_rate_pct == null ? "—" : pct(s.repeat_customer_rate_pct))}
+      ${card("Repeat order share", s.repeat_order_share_pct == null ? "—" : pct(s.repeat_order_share_pct))}
+      ${card("Guest order share", s.guest_order_share_pct == null ? "—" : pct(s.guest_order_share_pct))}
+    </div>
+  </section>
+  ${bucketCards("New customer orders", nv.new_customer_orders)}
+  ${bucketCards("Returning customer orders", nv.returning_customer_orders)}
+  <section>
+    <h2>Observed Customer Value</h2>
+    <p class="note">${escapeHtml(ov.note || "Not predictive LTV.")}</p>
+    <div class="grid">
+      ${card("Avg orders", num(ov.average_orders, 2))}
+      ${card("Avg revenue", money(ov.average_revenue))}
+      ${card("Avg GP", money(ov.average_gp))}
+    </div>
+    <table>
+      <thead><tr><th>Customer key</th><th>Orders</th><th>Revenue</th><th>GP</th><th>First</th><th>Cohort</th><th>Acquisition</th></tr></thead>
+      <tbody>${topCust || `<tr><td colspan="7" class="empty">None.</td></tr>`}</tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Repeat Purchase</h2>
+    <div class="grid">
+      ${card("Median days to 2nd", num(rp.median_days_to_second_order, 1))}
+      ${card("Avg days to 2nd", num(rp.average_days_to_second_order, 1))}
+      ${card("Repeat ≤30d", rp.repeat_within_30d?.rate_pct == null ? "—" : pct(rp.repeat_within_30d.rate_pct))}
+      ${card("Repeat ≤60d", rp.repeat_within_60d?.rate_pct == null ? "—" : pct(rp.repeat_within_60d.rate_pct))}
+      ${card("Repeat ≤90d", rp.repeat_within_90d?.rate_pct == null ? "—" : pct(rp.repeat_within_90d.rate_pct))}
+    </div>
+  </section>
+  <section>
+    <h2>Monthly Cohorts</h2>
+    <p class="note">Immature 30/60/90 checkpoints show as — (cohort has not aged).</p>
+    <table>
+      <thead><tr><th>Cohort</th><th>Customers</th><th>Rev/cust</th><th>GP/cust</th><th>Repeat</th><th>30d</th><th>60d</th><th>90d</th></tr></thead>
+      <tbody>${cohortRows || `<tr><td colspan="8" class="empty">None.</td></tr>`}</tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Acquisition Cohorts</h2>
+    <p class="note">First-order first-party acquisition. Unattributed customers are not allocated.</p>
+    <table>
+      <thead><tr><th>Acquisition</th><th>Customers</th><th>Rev/cust</th><th>GP/cust</th><th>Orders/cust</th><th>Repeat</th></tr></thead>
+      <tbody>${acqRows || `<tr><td colspan="6" class="empty">None.</td></tr>`}</tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Observed CAC</h2>
+    <p class="note">${escapeHtml(cac.label || "FIRST-PARTY OBSERVED NEW-CUSTOMER CAC")} · ${escapeHtml(cac.observed_gp_cac_label || "OBSERVED GP:CAC")} (not LTV:CAC). Confidence: <strong>${escapeHtml(cac.confidence || "—")}</strong>.</p>
+    <div class="grid">
+      ${card("Meta spend", money(cac.meta_spend))}
+      ${card("Meta new customers", num(cac.meta_new_customers, 0))}
+      ${card("FP observed CAC", money(cac.first_party_observed_new_customer_cac))}
+      ${card("Obs. GP/customer", money(cac.observed_gp_per_customer))}
+      ${card("Observed GP:CAC", num(cac.observed_gp_cac_ratio, 2))}
+      ${card("Observed Rev:CAC", num(cac.observed_revenue_cac_ratio, 2))}
+    </div>
+  </section>
+  <section>
+    <h2>Data Quality</h2>
+    <ul class="warn-list">${warnList || `<li class="empty">No customer warnings.</li>`}</ul>
+  </section>
+</div>`;
+}
+
 const STYLES = `
 :root {
   --bg: #f5f4f0;
@@ -1781,6 +1952,7 @@ function renderUnifiedDashboard(report) {
     ["sales", "Sales"],
     ["products", "Products"],
     ["inventory", "Inventory"],
+    ["customers", "Customers"],
     ["advertising", "Advertising"],
     ["decisions", "Decisions"],
     ["data-quality", "Data Quality"],
@@ -1828,6 +2000,7 @@ function renderUnifiedDashboard(report) {
     ${renderSales(ctx)}
     ${renderProducts(ctx)}
     ${renderInventory(ctx)}
+    ${renderCustomers(ctx)}
     ${renderAdvertising(ctx)}
     ${renderDecisions(ctx)}
     ${renderDataQuality(ctx)}
