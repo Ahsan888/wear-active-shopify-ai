@@ -1,10 +1,13 @@
 /**
  * Build first-party attributed economics by Meta campaign / ad set / ad.
  *
+ * Phase 5B eligible orders = recognized Ledger ∩ post_capture only.
+ * Pre-capture / historical journey attribution stays diagnostic (5A), not economics.
+ *
  * Concepts kept separate:
  * 1. Meta-reported attribution (platform metrics / spend)
- * 2. First-party observed Shopify attribution (this module)
- * 3. Unattributed Shopify recognized orders
+ * 2. First-party observed Shopify attribution (this module, post-capture)
+ * 3. Unattributed post-capture Shopify recognized orders
  *
  * Observational — not causal. Does not allocate unattributed orders.
  */
@@ -71,6 +74,13 @@ function sortEntities(list) {
   });
 }
 
+function isFirstPartyMeta(attr) {
+  return (
+    attr.status === "meta_first_party" ||
+    hasStableMetaIds(attr.last_attributable_touch || attr.first_touch)
+  );
+}
+
 /**
  * @param {object} input
  * @param {object[]} input.orders - Shopify GraphQL attribution orders
@@ -101,10 +111,11 @@ function buildAttributedEconomics(input = {}) {
   seedMetaSpend(adsMap, metaEntities.ads, "ad");
 
   const warnings = [];
-  let post_capture_recognized = 0;
-  let recognized_orders = 0;
-  let attributed_recognized_orders = 0;
-  let unattributed_recognized_orders = 0;
+  let window_recognized_orders = 0;
+  let window_recognized_revenue = 0;
+  let post_capture_recognized_orders = 0;
+  let post_capture_attributed_orders = 0;
+  let post_capture_unattributed_orders = 0;
   let attributed_revenue = 0;
   let attributed_cogs = 0;
   let attributed_gp = 0;
@@ -115,7 +126,6 @@ function buildAttributedEconomics(input = {}) {
   let unmatched_adset_ids = 0;
   let unmatched_ad_ids = 0;
   const seenOrderKeys = new Set();
-  const attributedOrderKeys = new Set();
 
   for (const order of orders) {
     const econ = lookupOrderEconomics(ledgerByOrderId, order);
@@ -128,29 +138,39 @@ function buildAttributedEconomics(input = {}) {
     if (!orderKey || seenOrderKeys.has(orderKey)) continue;
     seenOrderKeys.add(orderKey);
 
-    recognized_orders += 1;
+    // Window context (all recognized Ledger joins in range)
+    window_recognized_orders += 1;
+    window_recognized_revenue += econ.net_revenue_ex_tax;
+
     const attr = normalizeOrderAttribution(order, { capture_started_at });
-    if (attr.phase === "post_capture") post_capture_recognized += 1;
+
+    // Phase 5B economics: post_capture recognized only
+    if (attr.phase !== "post_capture") continue;
+
+    post_capture_recognized_orders += 1;
 
     const evidence = attr.meta_evidence || {};
     const match = matchMetaIds(evidence, metaEntities);
-    const isFpMeta =
-      attr.status === "meta_first_party" || hasStableMetaIds(attr.last_attributable_touch || attr.first_touch);
+    const isFpMeta = isFirstPartyMeta(attr);
 
     if (!isFpMeta) {
-      unattributed_recognized_orders += 1;
+      post_capture_unattributed_orders += 1;
       unattributed_revenue += econ.net_revenue_ex_tax;
       continue;
     }
 
-    attributed_recognized_orders += 1;
-    attributedOrderKeys.add(orderKey);
+    post_capture_attributed_orders += 1;
     attributed_revenue += econ.net_revenue_ex_tax;
     attributed_cogs += econ.cogs;
     attributed_gp += econ.gross_profit;
     attributed_units += econ.units;
 
-    if (hasStableMetaIds(attr.last_attributable_touch || attr.first_touch) || evidence.campaign_id || evidence.adset_id || evidence.ad_id) {
+    if (
+      hasStableMetaIds(attr.last_attributable_touch || attr.first_touch) ||
+      evidence.campaign_id ||
+      evidence.adset_id ||
+      evidence.ad_id
+    ) {
       stable_id_orders += 1;
     }
 
@@ -191,24 +211,33 @@ function buildAttributedEconomics(input = {}) {
   const shopify_recognized_revenue = round2(
     Number(shopify_channel.net_revenue_ex_tax) || 0
   );
-  const shopify_recognized_orders = Number(shopify_channel.orders) || recognized_orders;
+  const shopify_recognized_orders =
+    Number(shopify_channel.orders) || window_recognized_orders;
 
   attributed_revenue = round2(attributed_revenue);
   attributed_cogs = round2(attributed_cogs);
   attributed_gp = round2(attributed_gp);
   unattributed_revenue = round2(unattributed_revenue);
+  window_recognized_revenue = round2(window_recognized_revenue);
 
-  const coverage_pct = pct(attributed_recognized_orders, recognized_orders);
-  const stable_id_coverage_pct = pct(stable_id_orders, attributed_recognized_orders);
+  // Coverage uses post-capture denominator only; null when no post-capture sample
+  const coverage_pct =
+    post_capture_recognized_orders > 0
+      ? pct(post_capture_attributed_orders, post_capture_recognized_orders)
+      : null;
+  const stable_id_coverage_pct = pct(
+    stable_id_orders,
+    post_capture_attributed_orders
+  );
   const spend = round2(Number(meta_spend_total) || 0);
   const contribution = round2(attributed_gp - spend);
 
   const confidence = attributedEconomicsConfidence({
-    attributed_recognized_orders,
+    attributed_recognized_orders: post_capture_attributed_orders,
     coverage_pct,
   });
 
-  if (attributed_recognized_orders < 5) {
+  if (post_capture_attributed_orders < 5) {
     warnings.push("small_attributed_sample");
   }
   if (coverage_pct != null && coverage_pct < 70) {
@@ -226,29 +255,38 @@ function buildAttributedEconomics(input = {}) {
   );
   const ads = sortEntities([...adsMap.values()].map(finalizeEntityBucket));
 
-  // Reconciliation: sum of matched campaign order economics vs attributed with campaign_id
   const campaignRevenueSum = round2(
     campaigns.filter((c) => c.orders > 0).reduce((s, c) => s + c.revenue_ex_tax, 0)
   );
+
+  const reconOrders =
+    post_capture_attributed_orders + post_capture_unattributed_orders;
 
   return {
     experimental: true,
     label: "FIRST-PARTY ATTRIBUTED ECONOMICS — EXPERIMENTAL",
     observational_note:
-      "Meta spend is date-range entity spend. Shopify revenue is first-party observed attribution on recognized Ledger orders — not causal attribution.",
+      "Eligible orders are recognized Ledger ∩ post_capture only. Meta spend is period entity spend. first_party_attributed_contribution = observed attributed GP − period Meta spend (not true business contribution while coverage is low).",
     period,
     capture_started_at,
     confidence,
     warnings,
     account: {
+      // Window context (all recognized joins — not the 5B coverage denominator)
       shopify_recognized_orders,
       shopify_recognized_revenue,
-      attributed_recognized_orders,
+      window_recognized_orders,
+      window_recognized_revenue,
+
+      // Phase 5B post-capture scope
+      post_capture_recognized_orders,
+      post_capture_attributed_orders,
+      post_capture_unattributed_orders,
+      attributed_recognized_orders: post_capture_attributed_orders,
+      unattributed_recognized_orders: post_capture_unattributed_orders,
       attributed_revenue,
-      unattributed_recognized_orders,
       unattributed_revenue,
       attributed_coverage_pct: coverage_pct,
-      post_capture_recognized_orders: post_capture_recognized,
       stable_id_orders,
       stable_id_coverage_pct,
       attributed_units: round2(attributed_units),
@@ -260,12 +298,14 @@ function buildAttributedEconomics(input = {}) {
           : null,
       meta_spend: spend,
       first_party_cpa:
-        attributed_recognized_orders > 0
-          ? round2(spend / attributed_recognized_orders)
+        post_capture_attributed_orders > 0
+          ? round2(spend / post_capture_attributed_orders)
           : null,
       first_party_roas: spend > 0 ? round2(attributed_revenue / spend) : null,
       gp_roas: spend > 0 ? round2(attributed_gp / spend) : null,
       first_party_attributed_contribution: contribution,
+      contribution_label:
+        "observed attributed GP less period Meta spend (coverage-sensitive)",
       contribution_margin_pct:
         attributed_revenue > 0
           ? round2((contribution / attributed_revenue) * 100)
@@ -280,12 +320,14 @@ function buildAttributedEconomics(input = {}) {
       ad_ids: unmatched_ad_ids,
     },
     reconciliation: {
+      post_capture_recognized_orders,
+      post_capture_attributed_plus_unattributed: reconOrders,
+      post_capture_orders_reconcile:
+        reconOrders === post_capture_recognized_orders,
       attributed_revenue,
       sum_entity_campaign_revenue_with_orders: campaignRevenueSum,
-      // May exceed attributed_revenue if some attributed orders lack campaign_id
-      // or be lower if IDs missing — diagnostic only
       notes:
-        "Entity rows use stable IDs only. Orders without campaign_id do not appear in campaign totals.",
+        "5B coverage denominator is post_capture recognized only. Pre-capture Meta/journey evidence is excluded from attributed economics.",
     },
   };
 }
@@ -294,4 +336,5 @@ module.exports = {
   buildAttributedEconomics,
   metaRowId,
   metaRowName,
+  isFirstPartyMeta,
 };

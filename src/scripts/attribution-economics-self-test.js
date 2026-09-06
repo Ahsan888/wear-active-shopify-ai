@@ -75,11 +75,11 @@ function cogsRow(date, orderId, line, debit, qty = 1) {
   ];
 }
 
-function gqlOrder(id, name, attrs) {
+function gqlOrder(id, name, attrs, createdAt = "2026-09-07T10:00:00+05:00") {
   return {
     id: `gid://shopify/Order/${id}`,
     name,
-    createdAt: "2026-09-07T10:00:00+05:00",
+    createdAt,
     customAttributes: attrs || [],
   };
 }
@@ -166,6 +166,7 @@ test("cancelled/unrecognized GraphQL orders excluded from economics", () => {
   });
   assert.strictEqual(report.account.attributed_recognized_orders, 1);
   assert.strictEqual(report.account.attributed_revenue, 1000);
+  assert.strictEqual(report.account.post_capture_attributed_orders, 1);
 });
 
 test("matched campaign / ad economics", () => {
@@ -294,6 +295,9 @@ test("unattributed orders excluded from entity totals", () => {
   });
   assert.strictEqual(report.account.attributed_revenue, 1000);
   assert.strictEqual(report.account.unattributed_revenue, 800);
+  assert.strictEqual(report.account.post_capture_recognized_orders, 2);
+  assert.strictEqual(report.account.post_capture_attributed_orders, 1);
+  assert.strictEqual(report.account.post_capture_unattributed_orders, 1);
   assert.strictEqual(
     report.campaigns.find((c) => c.id === "10").revenue_ex_tax,
     1000
@@ -498,6 +502,201 @@ test("lookupOrderEconomics joins gid to ledger", () => {
   });
   assert.ok(e);
   assert.strictEqual(e.net_revenue_ex_tax, 100);
+});
+
+const CAPTURE = "2026-09-06T00:00:00+05:00";
+const metaTouch = {
+  source: "facebook",
+  medium: "paid_social",
+  campaign_id: "10",
+  adset_id: "20",
+  ad_id: "30",
+  fbclid: "pc",
+};
+
+test("pre_capture Meta order excluded from economics", () => {
+  const idx = indexRecognizedShopifyOrderEconomics(
+    [
+      saleRow("2026-08-15", "1", "a", 2000),
+      cogsRow("2026-08-15", "1", "a", 800),
+      saleRow("2026-09-07", "2", "a", 500),
+      cogsRow("2026-09-07", "2", "a", 200),
+    ],
+    LEDGER_HEADER,
+    "2026-08-01",
+    "2026-09-10"
+  );
+  const report = buildAttributedEconomics({
+    orders: [
+      gqlOrder(
+        "1",
+        "#1",
+        waAttr(metaTouch),
+        "2026-08-15T12:00:00+05:00" // pre_capture
+      ),
+      gqlOrder(
+        "2",
+        "#2",
+        [], // post_capture unattributed
+        "2026-09-07T12:00:00+05:00"
+      ),
+    ],
+    ledgerByOrderId: idx,
+    metaEntities: {
+      campaigns: [{ campaign_id: "10", spend: 100 }],
+      adsets: [{ adset_id: "20", spend: 100 }],
+      ads: [{ ad_id: "30", spend: 100 }],
+    },
+    meta_spend_total: 100,
+    shopify_channel: { net_revenue_ex_tax: 2500, orders: 2 },
+    capture_started_at: CAPTURE,
+    period: { since: "2026-08-01", until: "2026-09-10" },
+  });
+  assert.strictEqual(report.account.window_recognized_orders, 2);
+  assert.strictEqual(report.account.post_capture_recognized_orders, 1);
+  assert.strictEqual(report.account.post_capture_attributed_orders, 0);
+  assert.strictEqual(report.account.attributed_revenue, 0);
+  assert.strictEqual(report.account.attributed_cogs, 0);
+  const camp = report.campaigns.find((c) => c.id === "10");
+  assert.strictEqual(camp.orders, 0);
+  assert.strictEqual(camp.meta_spend, 100); // Meta spend still visible
+});
+
+test("post_capture Meta recognized included", () => {
+  const idx = indexRecognizedShopifyOrderEconomics(
+    [saleRow("2026-09-07", "3", "a", 1500), cogsRow("2026-09-07", "3", "a", 500)],
+    LEDGER_HEADER,
+    "2026-09-01",
+    "2026-09-10"
+  );
+  const report = buildAttributedEconomics({
+    orders: [
+      gqlOrder("3", "#3", waAttr(metaTouch), "2026-09-07T12:00:00+05:00"),
+    ],
+    ledgerByOrderId: idx,
+    metaEntities: {
+      campaigns: [{ campaign_id: "10", spend: 200 }],
+      adsets: [{ adset_id: "20", spend: 200 }],
+      ads: [{ ad_id: "30", spend: 200 }],
+    },
+    meta_spend_total: 200,
+    shopify_channel: { net_revenue_ex_tax: 1500, orders: 1 },
+    capture_started_at: CAPTURE,
+    period: { since: "2026-09-01", until: "2026-09-10" },
+  });
+  assert.strictEqual(report.account.post_capture_attributed_orders, 1);
+  assert.strictEqual(report.account.attributed_revenue, 1500);
+  assert.strictEqual(report.account.attributed_cogs, 500);
+  assert.strictEqual(
+    report.campaigns.find((c) => c.id === "10").orders,
+    1
+  );
+});
+
+test("post_capture direct/unattributed in denominator; pre_capture does not lower coverage", () => {
+  const idx = indexRecognizedShopifyOrderEconomics(
+    [
+      saleRow("2026-08-10", "1", "a", 9000),
+      cogsRow("2026-08-10", "1", "a", 1000),
+      saleRow("2026-09-07", "2", "a", 1000),
+      cogsRow("2026-09-07", "2", "a", 400),
+      saleRow("2026-09-07", "3", "a", 500),
+      cogsRow("2026-09-07", "3", "a", 100),
+    ],
+    LEDGER_HEADER,
+    "2026-08-01",
+    "2026-09-10"
+  );
+  const report = buildAttributedEconomics({
+    orders: [
+      // Huge pre_capture Meta order — must NOT enter coverage denom/numer
+      gqlOrder("1", "#1", waAttr(metaTouch), "2026-08-10T12:00:00+05:00"),
+      gqlOrder("2", "#2", waAttr(metaTouch), "2026-09-07T12:00:00+05:00"),
+      gqlOrder("3", "#3", [], "2026-09-07T13:00:00+05:00"), // unattributed post_capture
+    ],
+    ledgerByOrderId: idx,
+    metaEntities: {
+      campaigns: [{ campaign_id: "10", spend: 50 }],
+      adsets: [],
+      ads: [],
+    },
+    meta_spend_total: 50,
+    shopify_channel: { net_revenue_ex_tax: 10500, orders: 3 },
+    capture_started_at: CAPTURE,
+    period: { since: "2026-08-01", until: "2026-09-10" },
+  });
+  assert.strictEqual(report.account.post_capture_recognized_orders, 2);
+  assert.strictEqual(report.account.post_capture_attributed_orders, 1);
+  assert.strictEqual(report.account.post_capture_unattributed_orders, 1);
+  assert.strictEqual(report.account.attributed_coverage_pct, 50);
+  assert.strictEqual(report.account.attributed_revenue, 1000);
+});
+
+test("zero post_capture recognized => coverage null", () => {
+  const idx = indexRecognizedShopifyOrderEconomics(
+    [saleRow("2026-08-10", "1", "a", 1000), cogsRow("2026-08-10", "1", "a", 400)],
+    LEDGER_HEADER,
+    "2026-08-01",
+    "2026-09-10"
+  );
+  const report = buildAttributedEconomics({
+    orders: [
+      gqlOrder("1", "#1", waAttr(metaTouch), "2026-08-10T12:00:00+05:00"),
+    ],
+    ledgerByOrderId: idx,
+    metaEntities: {
+      campaigns: [{ campaign_id: "10", spend: 80 }],
+      adsets: [],
+      ads: [],
+    },
+    meta_spend_total: 80,
+    shopify_channel: { net_revenue_ex_tax: 1000, orders: 1 },
+    capture_started_at: CAPTURE,
+    period: { since: "2026-08-01", until: "2026-09-10" },
+  });
+  assert.strictEqual(report.account.post_capture_recognized_orders, 0);
+  assert.strictEqual(report.account.attributed_coverage_pct, null);
+  assert.strictEqual(report.confidence, "insufficient");
+  assert.ok(report.campaigns.find((c) => c.id === "10").meta_spend === 80);
+});
+
+test("post_capture attributed + unattributed reconciliation exact", () => {
+  const idx = indexRecognizedShopifyOrderEconomics(
+    [
+      saleRow("2026-09-07", "1", "a", 100),
+      cogsRow("2026-09-07", "1", "a", 40),
+      saleRow("2026-09-07", "2", "a", 200),
+      cogsRow("2026-09-07", "2", "a", 50),
+      saleRow("2026-09-07", "3", "a", 300),
+      cogsRow("2026-09-07", "3", "a", 60),
+    ],
+    LEDGER_HEADER,
+    "2026-09-01",
+    "2026-09-10"
+  );
+  const report = buildAttributedEconomics({
+    orders: [
+      gqlOrder("1", "#1", waAttr(metaTouch), "2026-09-07T10:00:00+05:00"),
+      gqlOrder("2", "#2", [], "2026-09-07T11:00:00+05:00"),
+      gqlOrder("3", "#3", [{ key: "x", value: "y" }], "2026-09-07T12:00:00+05:00"),
+    ],
+    ledgerByOrderId: idx,
+    metaEntities: {
+      campaigns: [{ campaign_id: "10", spend: 10 }],
+      adsets: [],
+      ads: [],
+    },
+    meta_spend_total: 10,
+    shopify_channel: { net_revenue_ex_tax: 600, orders: 3 },
+    capture_started_at: CAPTURE,
+    period: { since: "2026-09-01", until: "2026-09-10" },
+  });
+  const a = report.account;
+  assert.strictEqual(
+    a.post_capture_attributed_orders + a.post_capture_unattributed_orders,
+    a.post_capture_recognized_orders
+  );
+  assert.ok(report.reconciliation.post_capture_orders_reconcile);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

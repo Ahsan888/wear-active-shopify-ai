@@ -1099,10 +1099,13 @@ function renderAttributionEconomics(ctx) {
       ${card("Unattributed revenue", money(a.unattributed_revenue))}
       ${card("Attributed coverage", a.attributed_coverage_pct == null ? "—" : pct(a.attributed_coverage_pct))}
       ${card("Meta spend", money(a.meta_spend))}
-      ${card("FP contribution", money(a.first_party_attributed_contribution))}
+      ${card("Obs. GP − Meta spend", money(a.first_party_attributed_contribution))}
       ${card("Post-capture recog.", num(a.post_capture_recognized_orders, 0))}
+      ${card("Post-capture attributed", num(a.post_capture_attributed_orders, 0))}
+      ${card("Post-capture unattr.", num(a.post_capture_unattributed_orders, 0))}
       ${card("Stable-ID coverage", a.stable_id_coverage_pct == null ? "—" : pct(a.stable_id_coverage_pct))}
     </div>
+    <p class="note">${escapeHtml(a.contribution_label || "Observed attributed GP less period Meta spend — coverage-sensitive, not true business contribution.")}</p>
   </section>
   <section>
     <h2>Campaigns</h2>

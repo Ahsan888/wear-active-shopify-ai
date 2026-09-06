@@ -160,7 +160,21 @@ npm run attribution:economics -- --days=7
 npm run attribution:economics -- --since=2026-08-01 --until=2026-09-06 --json
 ```
 
-Connects first-party Meta IDs on **recognized Ledger Shopify orders** to entity spend.
+Connects first-party Meta IDs on **recognized Ledger ∩ post_capture** Shopify
+orders to entity spend.
+
+Pre-capture / historical journey evidence remains diagnostic (Phase 5A) and is
+**excluded** from attributed revenue, COGS, entity economics, coverage, and
+confidence sample size.
+
+Coverage:
+
+`post_capture_attributed_orders / post_capture_recognized_orders`
+
+(null when post-capture recognized = 0).
+
+`first_party_attributed_contribution` = observed attributed GP − period Meta spend
+(coverage-sensitive; not true business contribution while coverage is low).
 
 Keeps separate:
 

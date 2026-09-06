@@ -60,13 +60,16 @@ function printAttributedEconomics(report) {
 
   console.log("ACCOUNT SUMMARY");
   console.log(`  Shopify recognized revenue     ${money(a.shopify_recognized_revenue)}`);
-  console.log(`  Attributed revenue              ${money(a.attributed_revenue)}`);
-  console.log(`  Unattributed revenue           ${money(a.unattributed_revenue)}`);
+  console.log(`  Attributed revenue (post-cap)  ${money(a.attributed_revenue)}`);
+  console.log(`  Unattributed revenue (post-cap)${money(a.unattributed_revenue)}`);
   console.log(`  Attributed coverage            ${pct(a.attributed_coverage_pct)}`);
   console.log(`  Post-capture recognized        ${num(a.post_capture_recognized_orders, 0)}`);
+  console.log(`  Post-capture attributed        ${num(a.post_capture_attributed_orders, 0)}`);
+  console.log(`  Post-capture unattributed      ${num(a.post_capture_unattributed_orders, 0)}`);
   console.log(`  Stable-ID coverage (of attr.)  ${pct(a.stable_id_coverage_pct)}`);
   console.log(`  Meta spend                     ${money(a.meta_spend)}`);
-  console.log(`  FP attributed contribution     ${money(a.first_party_attributed_contribution)}`);
+  console.log(`  Observed attr. GP − Meta spend ${money(a.first_party_attributed_contribution)}`);
+  console.log(`    (${a.contribution_label || "coverage-sensitive; not true business contribution"})`);
   console.log(`  FP CPA                         ${money(a.first_party_cpa)}`);
   console.log(`  FP ROAS                        ${roas(a.first_party_roas)}`);
   console.log(`  GP ROAS                        ${roas(a.gp_roas)}`);
