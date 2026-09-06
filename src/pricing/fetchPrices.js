@@ -16,11 +16,14 @@ const PRICES_QUERY = `#graphql
           price
           compareAtPrice
           inventoryQuantity
+          createdAt
           product {
             id
             title
             status
             handle
+            createdAt
+            publishedAt
           }
           selectedOptions { name value }
         }
@@ -73,6 +76,9 @@ async function fetchVariantPrices(opts = {}) {
           node.inventoryQuantity == null
             ? null
             : Number(node.inventoryQuantity),
+        variant_created_at: node.createdAt || null,
+        product_created_at: node.product?.createdAt || null,
+        product_published_at: node.product?.publishedAt || null,
       });
     }
     if (!conn.pageInfo?.hasNextPage) return out;

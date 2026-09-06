@@ -8,12 +8,15 @@ const {
   simulateDiscount,
   simulateIncrease,
   minimumMarginPrice,
+  minimumAccountingSafeStickerPrice,
+  accountingSafeFloorPrice,
   maximumSafeDiscountPct,
   buildSimulationLadder,
 } = require("./simulate");
 const { classifyPricingAction } = require("./classify");
 const { buildPricingReport } = require("./build");
 const { printPricingReport } = require("./report");
+const { resolveClearanceMaturity } = require("./maturity");
 
 module.exports = {
   resolvePricingThresholds,
@@ -23,9 +26,12 @@ module.exports = {
   simulateDiscount,
   simulateIncrease,
   minimumMarginPrice,
+  minimumAccountingSafeStickerPrice,
+  accountingSafeFloorPrice,
   maximumSafeDiscountPct,
   buildSimulationLadder,
   classifyPricingAction,
   buildPricingReport,
   printPricingReport,
+  resolveClearanceMaturity,
 };

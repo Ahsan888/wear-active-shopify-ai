@@ -27,9 +27,13 @@ function lineCandidate(r) {
   return (
     `  ${r.sku}  ${r.product || "?"} / ${r.variant || "—"}  ` +
     `stock=${num(r.current_stock, 0)}  class=${r.stock_class}  ` +
-    `price=${money(r.current_price)}  cost=${money(r.unit_cost)}  gm=${pct(r.unit_gm_pct)}  ` +
+    `price=${money(r.current_price)}  cost=${money(r.unit_cost)}  ` +
+    `stickerGM=${pct(r.commercial_sticker_gm_pct ?? r.unit_gm_pct)}  ` +
+    `acctGM=${pct(r.accounting_gm_ex_tax_pct)}  ` +
+    `maxSafe=${pct(r.maximum_safe_discount_pct)}  ` +
     `${r.recommendation}  disc=${disc}  capital=${money(r.inventory_cost_capital_tied_up)}  ` +
-    `lift=${num(r.required_unit_lift_to_preserve_gp, 2)}x  conf=${r.confidence}`
+    `lift=${num(r.required_unit_lift_to_preserve_gp, 2)}x  conf=${r.confidence}` +
+    (r.immature_for_clearance ? "  immature" : "")
   );
 }
 
@@ -42,7 +46,7 @@ function printPricingReport(report) {
   if (p.since) console.log(`Period: ${p.since} → ${p.until}`);
   console.log("Advisory only — no Shopify price writes, no automatic discounts.");
   console.log(
-    `Convention: ${report.conventions?.unit_gp || "sticker − cost"} · ${report.conventions?.books_note || ""}`
+    `Convention: floors use ex-tax Books GM (${report.conventions?.pricing_floor || "accounting floor"})`
   );
   console.log("");
 
@@ -56,6 +60,12 @@ function printPricingReport(report) {
   console.log(`  CLEARANCE_CANDIDATE:     ${num(s.clearance_count, 0)}`);
   console.log(`  PRICE_INCREASE_CANDIDATE:${num(s.price_increase_count, 0)}`);
   console.log(`  INSUFFICIENT_DATA:       ${num(s.insufficient_count, 0)}`);
+  console.log(
+    `  Excluded immature (<90d): ${num(s.excluded_immature_clearance_count, 0)}`
+  );
+  console.log(
+    `  Mixed-variant products:  ${num(s.mixed_variant_product_count, 0)}`
+  );
   console.log("");
 
   console.log("CAPITAL AT RISK");
@@ -101,17 +111,33 @@ function printPricingReport(report) {
   }
   console.log("");
 
+  console.log("MIXED VARIANT PRODUCTS");
+  const mixed = (report.mixed_variant_products || []).slice(0, 10);
+  if (!mixed.length) console.log("  (none)");
+  else {
+    for (const m of mixed) {
+      console.log(
+        `  ${m.product}  → ${m.recommendation}  clearance=${m.clearance_variant_count} promo=${m.promotion_variant_count} protect=${m.protect_variant_count}`
+      );
+      if (m.explanation) console.log(`    ${m.explanation}`);
+    }
+  }
+  console.log("");
+
   console.log("DISCOUNT ECONOMICS (top clearance)");
   for (const r of clearance.slice(0, 5)) {
     console.log(`  ${r.product} / ${r.variant} (${r.sku})`);
     console.log(
-      `    stock=${num(r.current_stock, 0)}  30d=${num(r.units_sold_30d, 0)}  90d=${num(r.units_sold_90d, 0)}  class=${r.stock_class}`
+      `    stock=${num(r.current_stock, 0)}  30d=${num(r.units_sold_30d, 0)}  90d=${num(r.units_sold_90d, 0)}  class=${r.stock_class}  age=${num(r.selling_age_days, 0)}d`
     );
     console.log(
-      `    price=${money(r.current_price)}  cost=${money(r.unit_cost)}  gm=${pct(r.unit_gm_pct)}  → ${r.recommended_discount_pct}% ${money(r.recommended_price)}`
+      `    price=${money(r.current_price)}  cost=${money(r.unit_cost)}  stickerGM=${pct(r.commercial_sticker_gm_pct ?? r.unit_gm_pct)}  acctGM=${pct(r.accounting_gm_ex_tax_pct)}`
     );
     console.log(
-      `    disc GP=${money(r.scenario?.unit_gp)}  disc GM=${pct(r.scenario?.unit_gm_pct)}  lift=${num(r.required_unit_lift_to_preserve_gp, 2)}x  capital=${money(r.inventory_cost_capital_tied_up)}`
+      `    floor=${money(r.minimum_margin_price)}  maxSafeDisc=${pct(r.maximum_safe_discount_pct)}  → ${r.recommended_discount_pct}% ${money(r.recommended_price)}`
+    );
+    console.log(
+      `    disc stickerGP=${money(r.scenario?.commercial_sticker_gp ?? r.scenario?.unit_gp)}  disc acctGM=${pct(r.scenario?.accounting_gm_ex_tax_pct)}  lift=${num(r.required_unit_lift_to_preserve_gp, 2)}x  capital=${money(r.inventory_cost_capital_tied_up)}`
     );
   }
   console.log("");

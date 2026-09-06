@@ -1435,7 +1435,7 @@ function renderCustomers(ctx) {
 </div>`;
 }
 
-function pricingRows(list, cols = 9) {
+function pricingRows(list, cols = 10) {
   if (!list?.length) {
     return `<tr><td colspan="${cols}" class="empty">None.</td></tr>`;
   }
@@ -1451,8 +1451,9 @@ function pricingRows(list, cols = 9) {
       <td>${num(r.current_stock, 0)}</td>
       <td>${escapeHtml(r.stock_class || "—")}</td>
       <td>${money(r.current_price)}</td>
-      <td>${pct(r.unit_gm_pct)}</td>
-      <td><strong>${escapeHtml(r.recommendation || "—")}</strong><div class="muted">${disc}</div></td>
+      <td>${pct(r.commercial_sticker_gm_pct ?? r.unit_gm_pct)}</td>
+      <td>${pct(r.accounting_gm_ex_tax_pct)}</td>
+      <td><strong>${escapeHtml(r.recommendation || "—")}</strong><div class="muted">${disc}${r.immature_for_clearance ? " · immature" : ""}</div></td>
       <td>${num(r.required_unit_lift_to_preserve_gp, 2)}</td>
       <td>${money(r.inventory_cost_capital_tied_up)}</td>
     </tr>`;
@@ -1484,7 +1485,7 @@ function renderPricing(ctx) {
 
   const s = pr.summary || {};
   const th = `<thead><tr>
-  <th>SKU</th><th>Product</th><th>Stock</th><th>Class</th><th>Price</th><th>GM</th>
+  <th>SKU</th><th>Product</th><th>Stock</th><th>Class</th><th>Price</th><th>Sticker GM</th><th>Acct GM</th>
   <th>Recommendation</th><th>GP lift</th><th>Capital</th>
 </tr></thead>`;
   const warnList = (pr.data_quality?.warnings || [])
@@ -1499,13 +1500,28 @@ function renderPricing(ctx) {
       return `<tr>
       <td>${escapeHtml(r.product || "")} / ${escapeHtml(r.variant || "")}</td>
       <td>${money(r.current_price)} → ${money(r.recommended_price)} (${num(r.recommended_discount_pct, 0)}%)</td>
-      <td>${money(r.unit_gp)} → ${money(sc.unit_gp)}</td>
-      <td>${pct(r.unit_gm_pct)} → ${pct(sc.unit_gm_pct)}</td>
+      <td>${money(r.commercial_sticker_gp ?? r.unit_gp)} → ${money(sc.commercial_sticker_gp ?? sc.unit_gp)}</td>
+      <td>${pct(r.commercial_sticker_gm_pct ?? r.unit_gm_pct)} → ${pct(sc.commercial_sticker_gm_pct ?? sc.unit_gm_pct)}</td>
+      <td>${pct(r.accounting_gm_ex_tax_pct)} → ${pct(sc.accounting_gm_ex_tax_pct)}</td>
+      <td>${pct(r.maximum_safe_discount_pct)}</td>
       <td>${num(r.required_unit_lift_to_preserve_gp, 2)}x</td>
       <td>${money(r.inventory_cost_capital_tied_up)}</td>
       <td>${escapeHtml(r.confidence || "—")}</td>
     </tr>`;
     })
+    .join("");
+  const mixedRows = (pr.mixed_variant_products || [])
+    .slice(0, 15)
+    .map(
+      (m) => `<tr>
+      <td>${escapeHtml(m.product || "")}</td>
+      <td><strong>${escapeHtml(m.recommendation || "—")}</strong></td>
+      <td>${num(m.clearance_variant_count, 0)}</td>
+      <td>${num(m.promotion_variant_count, 0)}</td>
+      <td>${num(m.protect_variant_count, 0)}</td>
+      <td>${escapeHtml(m.explanation || "—")}</td>
+    </tr>`
+    )
     .join("");
 
   const incRows = (pr.price_increase_candidates || [])
@@ -1528,7 +1544,7 @@ function renderPricing(ctx) {
   <section>
     <div class="divider-label">PRICING &amp; PROMOTION INTELLIGENCE</div>
     <h2>Pricing Overview</h2>
-    <p class="note">Shopify sticker (tax-inclusive) − Variant Master cost. Inventory classes from Phase 7. Advisory only — no price writes.</p>
+    <p class="note">Safe discounts use Books ex-tax GM floors (splitInclusiveTax). Sticker GP remains visible. Clearance requires ≥90d sellable age. Advisory only — no price writes.</p>
     <div class="grid">
       ${card("SKUs", num(s.sku_count, 0))}
       ${card("Protect", num(s.protect_price_count, 0))}
@@ -1538,6 +1554,8 @@ function renderPricing(ctx) {
       ${card("Clearance", num(s.clearance_count, 0), "", "warn")}
       ${card("Price increase tests", num(s.price_increase_count, 0))}
       ${card("Insufficient", num(s.insufficient_count, 0))}
+      ${card("Excluded immature", num(s.excluded_immature_clearance_count, 0))}
+      ${card("Mixed-variant products", num(s.mixed_variant_product_count, 0))}
     </div>
   </section>
   <section>
@@ -1561,6 +1579,14 @@ function renderPricing(ctx) {
     <table>${th}<tbody>${pricingRows((pr.protect_price || []).slice(0, 15))}</tbody></table>
   </section>
   <section>
+    <h2>Mixed Variant Review</h2>
+    <p class="note">Shared-price products with both stockout risk and clearance/promo variants — do not apply product-wide markdown.</p>
+    <table>
+      <thead><tr><th>Product</th><th>Rec</th><th>Clearance vars</th><th>Promo vars</th><th>Protect vars</th><th>Explanation</th></tr></thead>
+      <tbody>${mixedRows || `<tr><td colspan="6" class="empty">None.</td></tr>`}</tbody>
+    </table>
+  </section>
+  <section>
     <h2>Price Increase Tests</h2>
     <p class="note">PRICE INCREASE TEST CANDIDATE — not a guaranteed revenue improvement. Demand may change.</p>
     <table>
@@ -1572,9 +1598,9 @@ function renderPricing(ctx) {
     <h2>Discount Simulator (clearance explainability)</h2>
     <table>
       <thead><tr>
-        <th>Product</th><th>Price path</th><th>GP path</th><th>GM path</th><th>Lift to hold GP</th><th>Capital</th><th>Conf</th>
+        <th>Product</th><th>Price path</th><th>Sticker GP</th><th>Sticker GM</th><th>Acct GM</th><th>Max safe disc</th><th>Lift to hold GP</th><th>Capital</th><th>Conf</th>
       </tr></thead>
-      <tbody>${simRows || `<tr><td colspan="7" class="empty">None.</td></tr>`}</tbody>
+      <tbody>${simRows || `<tr><td colspan="9" class="empty">None.</td></tr>`}</tbody>
     </table>
   </section>
   <section>

@@ -28,6 +28,17 @@ function splitInclusiveTax(grossInclusive, taxChargeable) {
   return { gross, taxAmount, revenueExTax };
 }
 
+/**
+ * Reverse of splitInclusiveTax — convert ex-tax revenue to tax-inclusive sticker.
+ * Uses the same TAX_RATE / TAX_DIVISOR (do not invent a second rate).
+ */
+function inclusiveFromExTax(revenueExTax, taxChargeable) {
+  const ex = parseMoney(revenueExTax);
+  if (!(ex > 0)) return round2(ex);
+  if (!taxChargeable) return round2(ex);
+  return round2(ex * TAX_DIVISOR);
+}
+
 function deliveryModeFromTags(tags) {
   const list = Array.isArray(tags)
     ? tags.map((t) => String(t).toLowerCase().trim())
@@ -95,9 +106,11 @@ function dateKey(value) {
 
 module.exports = {
   TAX_RATE,
+  TAX_DIVISOR,
   parseMoney,
   round2,
   splitInclusiveTax,
+  inclusiveFromExTax,
   deliveryModeFromTags,
   hasTag,
   isTaxChargeableFlag,
