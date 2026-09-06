@@ -14,6 +14,10 @@ const ORDER_ATTR_QUERY = `#graphql
           id
           name
           createdAt
+          email
+          customer {
+            id
+          }
           customAttributes { key value }
           customerJourneySummary {
             ready
