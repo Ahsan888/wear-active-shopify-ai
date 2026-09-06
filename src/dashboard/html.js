@@ -1127,6 +1127,140 @@ function renderAttributionEconomics(ctx) {
 </div>`;
 }
 
+function invSkuRows(rows, cols = 8) {
+  if (!rows?.length) {
+    return `<tr><td colspan="${cols}" class="empty">None.</td></tr>`;
+  }
+  return rows
+    .map(
+      (r) => `<tr>
+      <td>${escapeHtml(r.sku || "—")}</td>
+      <td>${escapeHtml(r.product || "—")}<div class="muted">${escapeHtml(r.variant || "")}</div></td>
+      <td>${num(r.current_stock, 0)}</td>
+      <td>${r.days_of_cover == null ? "—" : num(r.days_of_cover, 1)}</td>
+      <td>${num(r.units_sold_30d, 0)}</td>
+      <td>${escapeHtml(r.stock_class || "—")}</td>
+      <td>${escapeHtml(r.recommended_action || "—")}${
+        r.recommended_restock_qty != null
+          ? ` <span class="muted">(+${num(r.recommended_restock_qty, 0)})</span>`
+          : ""
+      }</td>
+      <td>${money(r.inventory_value)}</td>
+    </tr>`
+    )
+    .join("");
+}
+
+function renderInventory(ctx) {
+  const inv = ctx.report?.inventory;
+  if (!inv) {
+    return `<div id="view-inventory" class="view">
+  <section>
+    <div class="divider-label">INVENTORY &amp; DEMAND INTELLIGENCE</div>
+    <h2>Inventory</h2>
+    <p class="note">Not loaded for this report. Run <code>npm run inventory:report</code> or regenerate the dashboard.</p>
+    <p class="note">Advisory only — no Shopify inventory mutations, no purchase orders, no price changes.</p>
+  </section>
+</div>`;
+  }
+  if (inv.error) {
+    return `<div id="view-inventory" class="view">
+  <section>
+    <div class="divider-label">INVENTORY &amp; DEMAND INTELLIGENCE</div>
+    <h2>Inventory</h2>
+    <p class="note tone-bad">${escapeHtml(inv.error)}</p>
+  </section>
+</div>`;
+  }
+
+  const s = inv.summary || {};
+  const th = `<thead><tr>
+  <th>SKU</th><th>Product / Variant</th><th>Stock</th><th>Days cover</th>
+  <th>Sold 30d</th><th>Class</th><th>Action</th><th>Value</th>
+</tr></thead>`;
+  const warnList = (inv.data_quality?.warnings || [])
+    .slice(0, 40)
+    .map((w) => `<li>${escapeHtml(w)}</li>`)
+    .join("");
+
+  const productRows = (inv.products || [])
+    .slice(0, 40)
+    .map(
+      (p) => `<tr>
+      <td>${escapeHtml(p.product || "—")}</td>
+      <td>${num(p.current_stock, 0)}</td>
+      <td>${num(p.units_sold_30d, 0)}</td>
+      <td>${money(p.inventory_value)}</td>
+      <td>${escapeHtml(p.worst_stock_class || "—")}${
+        p.has_variant_stockout_risk
+          ? ` <span class="pill tone-bad">VARIANT RISK</span>`
+          : ""
+      }</td>
+      <td>${num(p.critical_variant_count, 0)} / ${num(p.low_variant_count, 0)} / ${num(p.out_of_stock_variant_count, 0)}</td>
+    </tr>`
+    )
+    .join("");
+
+  return `<div id="view-inventory" class="view">
+  <section>
+    <div class="divider-label">INVENTORY &amp; DEMAND INTELLIGENCE</div>
+    <h2>Inventory Overview</h2>
+    <p class="note">Shopify sellable stock × Variant Master cost; demand from recognized Ledger sales (gift/PR excluded). Headline units are SKU-addressable trusted only. Advisory only — no inventory mutations or POs.</p>
+    <div class="grid">
+      ${card("SKU-addressable units", num(s.total_units, 0), escapeHtml(s.total_units_scope || "Trusted SKUs only"))}
+      ${card("Unkeyed units", num(s.unkeyed_inventory_units, 0), `bundle/set≈${num(s.unkeyed_likely_bundle_set_units, 0)}`)}
+      ${card("Safe Shopify total", num(s.total_shopify_inventory_units_if_safe, 0), "addressable + unkeyed; excl duplicate SKUs")}
+      ${card("Inventory value", money(s.total_inventory_value), `excl missing-cost + duplicate SKUs`)}
+      ${card("No-recent-demand value", money(s.no_recent_demand_value), "30d soft — not in capital at risk")}
+      ${card("Dead inventory (90d)", money(s.dead_inventory_value))}
+      ${card("Overstock value", money(s.overstock_value))}
+      ${card("Capital at risk", s.capital_at_risk_pct == null ? "—" : pct(s.capital_at_risk_pct), money(s.capital_at_risk_value))}
+      ${card("Critical", num(s.critical_sku_count, 0), "", "bad")}
+      ${card("Low stock", num(s.low_sku_count, 0), "", "warn")}
+      ${card("Overstock SKUs", num(s.overstock_sku_count, 0))}
+      ${card("No demand 90d", num(s.no_demand_sku_count, 0))}
+      ${card("No recent 30d", num(s.no_recent_demand_sku_count, 0))}
+      ${card("Missing-SKU variants", num(s.missing_sku_variant_count, 0))}
+      ${card("Duplicate SKU variants", num(s.duplicate_sku_variant_count, 0), `excl ${num(s.duplicate_sku_units_excluded, 0)} units`)}
+    </div>
+  </section>
+  <section>
+    <h2>Restock Priorities</h2>
+    <table>${th}<tbody>${invSkuRows((inv.restock_priorities || []).slice(0, 20))}</tbody></table>
+  </section>
+  <section>
+    <h2>Stockout Risks</h2>
+    <table>${th}<tbody>${invSkuRows((inv.stockout_risks || []).slice(0, 20))}</tbody></table>
+  </section>
+  <section>
+    <h2>Overstock / Dead Stock</h2>
+    <table>${th}<tbody>${invSkuRows((inv.dead_slow_stock || []).slice(0, 20))}</tbody></table>
+  </section>
+  <section>
+    <h2>Top Sellers</h2>
+    <table>${th}<tbody>${invSkuRows((inv.top_sellers || []).slice(0, 15))}</tbody></table>
+  </section>
+  <section>
+    <h2>Product Summary</h2>
+    <p class="note">Product totals can look healthy while a size/color is critical — VARIANT RISK flags that.</p>
+    <table>
+      <thead><tr>
+        <th>Product</th><th>Units</th><th>Sold 30d</th><th>Value</th><th>Worst class</th><th>Crit / Low / OOS</th>
+      </tr></thead>
+      <tbody>${productRows || `<tr><td colspan="6" class="empty">None.</td></tr>`}</tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Variant table (priority order)</h2>
+    <table>${th}<tbody>${invSkuRows((inv.skus || []).slice(0, 50))}</tbody></table>
+  </section>
+  <section>
+    <h2>Data Quality</h2>
+    <ul class="warn-list">${warnList || `<li class="empty">No inventory warnings.</li>`}</ul>
+  </section>
+</div>`;
+}
+
 const STYLES = `
 :root {
   --bg: #f5f4f0;
@@ -1646,6 +1780,7 @@ function renderUnifiedDashboard(report) {
     ["profitability", "Profitability"],
     ["sales", "Sales"],
     ["products", "Products"],
+    ["inventory", "Inventory"],
     ["advertising", "Advertising"],
     ["decisions", "Decisions"],
     ["data-quality", "Data Quality"],
@@ -1692,6 +1827,7 @@ function renderUnifiedDashboard(report) {
     ${renderProfitability(ctx)}
     ${renderSales(ctx)}
     ${renderProducts(ctx)}
+    ${renderInventory(ctx)}
     ${renderAdvertising(ctx)}
     ${renderDecisions(ctx)}
     ${renderDataQuality(ctx)}

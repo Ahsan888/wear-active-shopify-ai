@@ -103,6 +103,39 @@ async function main() {
     };
   }
 
+  // Phase 7 — inventory & demand intelligence (advisory only)
+  try {
+    const { loadLedger, loadVariantMaster } = require("../profitability/books");
+    const { fetchShopifyInventory } = require("../inventory/fetchInventory");
+    const { buildDemandWindows } = require("../inventory/demand");
+    const { buildInventoryReport } = require("../inventory/build");
+    const { resolveThresholds } = require("../inventory/thresholds");
+
+    const [ledger, vm, shopifyVariants] = await Promise.all([
+      loadLedger(),
+      loadVariantMaster(),
+      fetchShopifyInventory(),
+    ]);
+    const demandWindows = buildDemandWindows(
+      ledger.data,
+      ledger.header,
+      dateRange.until,
+      vm.bySku
+    );
+    bundle.inventory = buildInventoryReport({
+      shopifyVariants,
+      demandWindows,
+      catalogBySku: vm.bySku,
+      thresholds: resolveThresholds(),
+      period: { since: dateRange.since, until: dateRange.until },
+    });
+  } catch (err) {
+    bundle.inventory = {
+      error: String(err.message || err),
+      advisory_only: true,
+    };
+  }
+
   const html = renderUnifiedDashboard(bundle);
 
   const outDir = path.join(process.cwd(), "reports", "dashboard");
