@@ -970,7 +970,7 @@ function renderAttribution(ctx) {
     <div class="divider-label">FIRST-PARTY ATTRIBUTION — EXPERIMENTAL</div>
     <h2>Attribution</h2>
     <p class="note">Attribution diagnostics are not loaded for this report. Run <code>npm run attribution:report</code> or regenerate the dashboard.</p>
-    <p class="note">Phase 5A does not compute attributed profit. Meta platform metrics and Shopify contribution remain separate.</p>
+    <p class="note">Phase 5A diagnostics only. Attributed economics live under <strong>Attr. Economics</strong> (experimental, observational).</p>
   </section>
 </div>`;
   }
@@ -1038,6 +1038,88 @@ function renderAttribution(ctx) {
   <section>
     <h2>Data Quality</h2>
     <ul class="warn-list">${warnings || `<li class="empty">No attribution warnings.</li>`}</ul>
+  </section>
+</div>`;
+}
+
+function renderEntityEconRows(rows) {
+  return (rows || [])
+    .slice(0, 20)
+    .map((r) => {
+      const label = r.name
+        ? `${escapeHtml(r.name)} <span class="muted">(${escapeHtml(String(r.id))})</span>`
+        : escapeHtml(String(r.id || "—"));
+      const tag = r.matched ? "" : ` <span class="tone-warn">unmatched</span>`;
+      return `<tr>
+  <td>${label}${tag}</td>
+  <td>${num(r.orders, 0)}</td>
+  <td>${money(r.revenue_ex_tax)}</td>
+  <td>${money(r.cogs)}</td>
+  <td>${money(r.gross_profit)}</td>
+  <td>${money(r.meta_spend)}</td>
+  <td>${money(r.first_party_cpa)}</td>
+  <td>${r.first_party_roas == null ? "—" : `${num(r.first_party_roas, 2)}x`}</td>
+  <td>${r.gp_roas == null ? "—" : `${num(r.gp_roas, 2)}x`}</td>
+  <td>${money(r.contribution_after_meta)}</td>
+</tr>`;
+    })
+    .join("");
+}
+
+function renderAttributionEconomics(ctx) {
+  const econ = ctx.report?.attribution_economics;
+  if (!econ) {
+    return `<div id="view-attr-economics" class="view">
+  <section>
+    <div class="divider-label">FIRST-PARTY ATTRIBUTED ECONOMICS — EXPERIMENTAL</div>
+    <h2>Attributed Economics</h2>
+    <p class="note">Not loaded for this report. Run <code>npm run attribution:economics</code> or regenerate the dashboard.</p>
+    <p class="note">Observational first-party attribution only — not causal. Meta-reported metrics remain separate. Decision classifiers unchanged.</p>
+  </section>
+</div>`;
+  }
+
+  const a = econ.account || {};
+  const warnList = (econ.warnings || [])
+    .map((w) => `<li>${escapeHtml(w)}</li>`)
+    .join("");
+  const th = `<thead><tr>
+  <th>Entity</th><th>Orders</th><th>Revenue</th><th>COGS</th><th>GP</th>
+  <th>Meta spend</th><th>FP CPA</th><th>FP ROAS</th><th>GP ROAS</th><th>Contribution</th>
+</tr></thead>`;
+
+  return `<div id="view-attr-economics" class="view">
+  <section>
+    <div class="divider-label">FIRST-PARTY ATTRIBUTED ECONOMICS — EXPERIMENTAL</div>
+    <h2>Account Summary</h2>
+    <p class="note">${escapeHtml(econ.observational_note || "Observational attribution — not causal.")} Confidence: <strong>${escapeHtml(econ.confidence || "—")}</strong>.</p>
+    <div class="grid">
+      ${card("Shopify recognized rev", money(a.shopify_recognized_revenue))}
+      ${card("Attributed revenue", money(a.attributed_revenue))}
+      ${card("Unattributed revenue", money(a.unattributed_revenue))}
+      ${card("Attributed coverage", a.attributed_coverage_pct == null ? "—" : pct(a.attributed_coverage_pct))}
+      ${card("Meta spend", money(a.meta_spend))}
+      ${card("FP contribution", money(a.first_party_attributed_contribution))}
+      ${card("Post-capture recog.", num(a.post_capture_recognized_orders, 0))}
+      ${card("Stable-ID coverage", a.stable_id_coverage_pct == null ? "—" : pct(a.stable_id_coverage_pct))}
+    </div>
+  </section>
+  <section>
+    <h2>Campaigns</h2>
+    <table>${th}<tbody>${renderEntityEconRows(econ.campaigns) || `<tr><td colspan="10" class="empty">None.</td></tr>`}</tbody></table>
+  </section>
+  <section>
+    <h2>Ad Sets</h2>
+    <table>${th}<tbody>${renderEntityEconRows(econ.adsets) || `<tr><td colspan="10" class="empty">None.</td></tr>`}</tbody></table>
+  </section>
+  <section>
+    <h2>Ads</h2>
+    <table>${th}<tbody>${renderEntityEconRows(econ.ads) || `<tr><td colspan="10" class="empty">None.</td></tr>`}</tbody></table>
+  </section>
+  <section>
+    <h2>Data Quality</h2>
+    <ul class="warn-list">${warnList || `<li class="empty">No economics warnings.</li>`}</ul>
+    <p class="note">Unmatched ID occurrences — campaign ${num(econ.unmatched?.campaign_ids, 0)}, ad set ${num(econ.unmatched?.adset_ids, 0)}, ad ${num(econ.unmatched?.ad_ids, 0)}.</p>
   </section>
 </div>`;
 }
@@ -1565,6 +1647,7 @@ function renderUnifiedDashboard(report) {
     ["decisions", "Decisions"],
     ["data-quality", "Data Quality"],
     ["attribution", "Attribution"],
+    ["attr-economics", "Attr. Economics"],
   ];
 
   const navHtml = navItems
@@ -1610,6 +1693,7 @@ function renderUnifiedDashboard(report) {
     ${renderDecisions(ctx)}
     ${renderDataQuality(ctx)}
     ${renderAttribution(ctx)}
+    ${renderAttributionEconomics(ctx)}
 
     <footer>
       Wear Active Reporting &amp; Decision Intelligence · Advisory only · No Meta mutations · No Sheet writes

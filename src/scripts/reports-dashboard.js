@@ -56,6 +56,14 @@ async function main() {
     const {
       buildAttributionDiagnostics,
     } = require("../attribution/coverage");
+    const {
+      indexRecognizedShopifyOrderEconomics,
+    } = require("../attribution/ledgerJoin");
+    const {
+      buildAttributedEconomics,
+    } = require("../attribution/entityEconomics");
+    const { loadLedger } = require("../profitability/books");
+
     const orders = await fetchOrdersForAttribution({
       since: dateRange.since,
       until: dateRange.until,
@@ -67,8 +75,27 @@ async function main() {
         ads: inputs.ads || [],
       },
     });
-    // Strip heavy per-order dump from embedded HTML
     delete bundle.attribution.orders;
+
+    const ledger = await loadLedger();
+    const ledgerByOrderId = indexRecognizedShopifyOrderEconomics(
+      ledger.data,
+      ledger.header,
+      dateRange.since,
+      dateRange.until
+    );
+    bundle.attribution_economics = buildAttributedEconomics({
+      orders,
+      ledgerByOrderId,
+      metaEntities: {
+        campaigns: inputs.campaigns || [],
+        adsets: inputs.adsets || [],
+        ads: inputs.ads || [],
+      },
+      meta_spend_total: inputs.meta?.totals?.spend || 0,
+      shopify_channel: inputs.sales_by_channel?.Shopify || {},
+      period: { since: dateRange.since, until: dateRange.until },
+    });
   } catch (err) {
     bundle.attribution = {
       error: String(err.message || err),

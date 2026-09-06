@@ -5,7 +5,14 @@
 function indexMetaEntities(entities = []) {
   const byId = new Map();
   for (const e of entities || []) {
-    const id = String(e.entity_id || e.id || e.ad_id || e.campaign_id || "");
+    const id = String(
+      e.entity_id ||
+        e.id ||
+        e.ad_id ||
+        e.adset_id ||
+        e.campaign_id ||
+        ""
+    );
     if (id) byId.set(id, e);
   }
   return byId;
