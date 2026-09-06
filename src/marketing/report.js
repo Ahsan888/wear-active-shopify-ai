@@ -68,7 +68,10 @@ function printMarketingDecisionReport(report) {
   console.log(`  Note: ${ev.fp_evidence?.note || "—"}`);
   console.log("");
 
-  console.log("7 / 14 / 30 META SUMMARY");
+  console.log("7 / 14 / 30 META SUMMARY (overlapping / contextual)");
+  console.log(
+    "  Note: Trailing windows overlap and are contextual, not independent observations."
+  );
   for (const d of ["7", "14", "30"]) {
     const m = report.meta_periods?.[d];
     if (!m) {
@@ -80,6 +83,30 @@ function printMarketingDecisionReport(report) {
         `CPA=${money(m.cpa)}  ROAS=${num(m.roas, 2)}x`
     );
   }
+  console.log("");
+
+  console.log("INDEPENDENT PERIODS (non-overlapping)");
+  const indep = report.meta_independent_periods || {};
+  if (!report.independent_periods_available || !Object.keys(indep).length) {
+    console.log("  (not loaded — repeated evidence unavailable)");
+  } else {
+    for (const key of ["recent_7d", "previous_7d", "prior_16d"]) {
+      const m = indep[key];
+      if (!m) {
+        console.log(`  ${key}: (missing)`);
+        continue;
+      }
+      console.log(
+        `  ${key}: ${m.since || "?"}→${m.until || "?"}  spend=${money(m.spend)}  purch=${num(m.purchases, 0)}  CPA=${money(m.cpa)}`
+      );
+    }
+  }
+  console.log(
+    `  Repeated weak entities:  ${num(report.summary?.repeated_weak_entity_count, 0)}`
+  );
+  console.log(
+    `  Repeated strong entities:${num(report.summary?.repeated_strong_entity_count, 0)}`
+  );
   console.log("");
 
   const queue = report.owner_action_queue || [];

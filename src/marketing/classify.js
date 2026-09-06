@@ -2,12 +2,19 @@
  * Deterministic marketing action classification (Phase 9).
  * Orchestrates Phase 3 entity status + inventory/pricing + period consistency.
  * No LLM. No budget math. Advisory only.
+ *
+ * REPEATED_* codes and REDUCE→PAUSE / STRONG_SCALE / confidence HIGH persistence
+ * require independent non-overlapping period evidence — not overlapping 7/14/30.
  */
 const { isBusinessProfitableEnoughForScale } = require("../decisions/business");
 const { isBusinessAdsSafeForScale } = require("../decisions/advertising");
 const { ENTITY_ZERO_PURCHASE, ENTITY_WITH_PURCHASES } = require("./thresholds");
 const { entityEvidenceConfidence } = require("./evidence");
 const { resolveInventoryMarketingContext } = require("./inventoryContext");
+const {
+  hasIndependentRepeatedWeakness,
+  hasIndependentRepeatedStrength,
+} = require("./periods");
 
 function creativeTestFromFunnel(entity) {
   const diags = entity.funnel_diagnostics || [];
@@ -22,7 +29,6 @@ function creativeTestFromFunnel(entity) {
     };
   }
 
-  // Healthy CTR but weak downstream — do NOT auto-blame creative
   if (downstream.length && !ctrWeak) {
     return {
       action: null,
@@ -43,11 +49,44 @@ function creativeTestFromFunnel(entity) {
   return null;
 }
 
+/**
+ * STRONG_SCALE requires independent repeated strength.
+ * Trailing overlap may support MODERATE_SCALE context only.
+ */
 function scaleStrength(periodConsistency, adsStatus) {
-  const strong = periodConsistency?.strong_period_count || 0;
-  if (strong >= 2 && adsStatus === "large_safety_margin") return "STRONG_SCALE";
-  if (strong >= 2) return "MODERATE_SCALE";
+  const independentStrong = hasIndependentRepeatedStrength(periodConsistency);
+  const trailingStrong =
+    Number(
+      periodConsistency?.trailing_window_consistency
+        ?.strong_trailing_window_count ??
+        periodConsistency?.strong_trailing_window_count
+    ) || 0;
+
+  if (independentStrong && adsStatus === "large_safety_margin") {
+    return "STRONG_SCALE";
+  }
+  if (independentStrong) return "MODERATE_SCALE";
+  if (trailingStrong >= 2) return "MODERATE_SCALE";
   return "TEST_SCALE";
+}
+
+function emptyPeriodConsistency() {
+  return {
+    trailing_direction: "INSUFFICIENT",
+    strong_trailing_window_count: 0,
+    weak_trailing_window_count: 0,
+    trailing_window_consistency: {
+      trailing_direction: "INSUFFICIENT",
+      strong_trailing_window_count: 0,
+      weak_trailing_window_count: 0,
+    },
+    independent_period_evidence: {
+      available: false,
+      independent_periods_compared: null,
+      independent_strong_period_count: null,
+      independent_weak_period_count: null,
+    },
+  };
 }
 
 /**
@@ -59,11 +98,10 @@ function classifyMarketingEntity(entity, ctx = {}) {
   const warnings = [];
   const business_health = ctx.business_health || {};
   const ads_safety = ctx.business_advertising_safety || {};
-  const period = entity.period_consistency || {
-    performance_direction: "INSUFFICIENT",
-    weak_period_count: 0,
-    strong_period_count: 0,
-  };
+  const period = entity.period_consistency || emptyPeriodConsistency();
+
+  const independentRepeatedWeak = hasIndependentRepeatedWeakness(period);
+  const independentRepeatedStrong = hasIndependentRepeatedStrength(period);
 
   if (ctx.fp_immature) {
     warnings.push("ATTRIBUTION_IMMATURE");
@@ -72,9 +110,7 @@ function classifyMarketingEntity(entity, ctx = {}) {
 
   const inv = resolveInventoryMarketingContext(entity, ctx);
   for (const c of inv.reason_codes || []) {
-    if (c === "INVENTORY_MAPPING_UNAVAILABLE") {
-      // informational only at entity level when no map — don't spam every row
-    } else {
+    if (c !== "INVENTORY_MAPPING_UNAVAILABLE") {
       reason_codes.push(c);
       if (c === "INVENTORY_LIMITED") constraints.push("INVENTORY_LIMITED");
     }
@@ -106,10 +142,12 @@ function classifyMarketingEntity(entity, ctx = {}) {
   ) {
     reason_codes.push("ROAS_ABOVE_ACCOUNT");
   }
-  if (period.strong_period_count >= 2) {
+
+  // REPEATED_* only from independent non-overlapping buckets
+  if (independentRepeatedStrong) {
     reason_codes.push("REPEATED_STRONG_PERFORMANCE");
   }
-  if (period.weak_period_count >= 2) {
+  if (independentRepeatedWeak) {
     reason_codes.push("REPEATED_WEAK_PERFORMANCE");
   }
 
@@ -122,7 +160,6 @@ function classifyMarketingEntity(entity, ctx = {}) {
   const spendX = entity.spend_vs_account_cpa;
   const purchases = Number(entity.purchases) || 0;
 
-  // Data quality / tiny sample
   if (status === "insufficient_data") {
     primary_action = "INSUFFICIENT_DATA";
     reason_codes.push("INSUFFICIENT_SPEND");
@@ -130,10 +167,10 @@ function classifyMarketingEntity(entity, ctx = {}) {
     primary_action = "MONITOR";
     reason_codes.push("INSUFFICIENT_PURCHASES");
   } else if (status === "high_priority_spend_no_purchase") {
+    // Direct spend-evidence rule — PAUSE immediately (not persistence-based)
     primary_action = "PAUSE";
     reason_codes.push("ZERO_PURCHASE_SPEND");
   } else if (status === "spend_no_purchase") {
-    // Meaningful but not pause-threshold — REDUCE if enough spend, else MONITOR
     if (spendX != null && spendX >= ENTITY_ZERO_PURCHASE.WATCH_LT) {
       primary_action = "REDUCE";
       reason_codes.push("ZERO_PURCHASE_SPEND");
@@ -142,11 +179,13 @@ function classifyMarketingEntity(entity, ctx = {}) {
       reason_codes.push("INSUFFICIENT_PURCHASES");
     }
   } else if (status === "high_cpa") {
-    primary_action =
-      period.weak_period_count >= 2 && purchases >= 3 ? "PAUSE" : "REDUCE";
-    reason_codes.push("CPA_ABOVE_ACCOUNT");
-    if (period.weak_period_count >= 2) {
-      reason_codes.push("REPEATED_WEAK_PERFORMANCE");
+    // Persistence escalation requires independent repeated weakness
+    if (independentRepeatedWeak && purchases >= 3) {
+      primary_action = "PAUSE";
+      reason_codes.push("CPA_ABOVE_ACCOUNT");
+    } else {
+      primary_action = "REDUCE";
+      reason_codes.push("CPA_ABOVE_ACCOUNT");
     }
   } else if (status === "relatively_weak_cpa") {
     primary_action = "REDUCE";
@@ -182,7 +221,6 @@ function classifyMarketingEntity(entity, ctx = {}) {
       reason_codes.push("CONTROLLED_SCALE_CANDIDATE");
     }
   } else if (status === "strong" || status === "healthy") {
-    // Funnel CTR creative opportunity even when CPA healthy
     const creative = creativeTestFromFunnel(entity);
     if (creative?.action === "CREATIVE_TEST" && status === "healthy") {
       primary_action = "CREATIVE_TEST";
@@ -195,7 +233,6 @@ function classifyMarketingEntity(entity, ctx = {}) {
     primary_action = "MONITOR";
   }
 
-  // Secondary PROMOTION_TEST — never when PAUSE / severely bad
   if (
     inv.promotion_eligible &&
     !["PAUSE"].includes(primary_action) &&
@@ -206,7 +243,6 @@ function classifyMarketingEntity(entity, ctx = {}) {
     reason_codes.push("PROMOTION_MARGIN_AVAILABLE");
   }
 
-  // Immature clearance — explicitly no promotion escalation
   if (inv.immature_for_clearance && secondary_action === "PROMOTION_TEST") {
     secondary_action = null;
   }
@@ -216,20 +252,19 @@ function classifyMarketingEntity(entity, ctx = {}) {
     data_quality_block: ctx.data_quality_blocks_scale,
   });
 
-  // Scale confidence rises with repeated strength
-  if (primary_action === "SCALE" && period.strong_period_count >= 2) {
+  // Confidence HIGH from persistence only with independent repeated evidence
+  if (primary_action === "SCALE" && independentRepeatedStrong) {
     if (confidence === "medium") confidence = "high";
     if (confidence === "low") confidence = "medium";
   }
-  // Reduce/Pause confidence rises with repeated weakness
   if (
     (primary_action === "REDUCE" || primary_action === "PAUSE") &&
-    period.weak_period_count >= 2
+    independentRepeatedWeak
   ) {
     if (confidence === "medium") confidence = "high";
     if (confidence === "low") confidence = "medium";
   }
-  // Inventory mapping missing caps scale confidence
+
   if (primary_action === "SCALE" && inv.inventory_action === "UNKNOWN") {
     if (confidence === "high") confidence = "medium";
     warnings.push("INVENTORY_MAPPING_UNAVAILABLE");

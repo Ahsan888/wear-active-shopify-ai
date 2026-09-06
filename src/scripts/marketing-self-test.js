@@ -263,11 +263,11 @@ test("weak downstream conversion does not become creative-only", () => {
   assert.strictEqual(creative.creative_test_reason, "STRONG_CLICK_WEAK_CONVERSION");
 });
 
-test("repeated weakness raises confidence", () => {
+test("overlapping 7/14/30 weak alone do NOT count as repeated weakness", () => {
   const e = classifyMetaEntity(
     {
-      ad_id: "ad-rep",
-      ad_name: "Repeat weak",
+      ad_id: "ad-nest-w",
+      ad_name: "Nested weak",
       spend: 12000,
       purchases: 4,
       cpa: 3000,
@@ -279,62 +279,266 @@ test("repeated weakness raises confidence", () => {
     accountMeta,
     { entity_type: "ad" }
   );
-  const a1 = classifyMarketingEntity(
+  const a = classifyMarketingEntity(
     {
       ...e,
       period_consistency: {
-        performance_direction: "WORSENING",
-        weak_period_count: 1,
-        strong_period_count: 0,
+        trailing_window_consistency: {
+          trailing_direction: "WORSENING",
+          strong_trailing_window_count: 0,
+          weak_trailing_window_count: 3,
+        },
+        independent_period_evidence: {
+          available: false,
+          independent_weak_period_count: null,
+          independent_strong_period_count: null,
+        },
+        weak_trailing_window_count: 3,
+        strong_trailing_window_count: 0,
       },
     },
     bizCtx
   );
-  const a2 = classifyMarketingEntity(
-    {
-      ...e,
-      period_consistency: {
-        performance_direction: "WORSENING",
-        weak_period_count: 3,
-        strong_period_count: 0,
-      },
-    },
-    bizCtx
-  );
-  assert.ok(["REDUCE", "PAUSE"].includes(a2.primary_action));
-  // Repeated weakness → higher confidence than single period
-  const rank = { insufficient: 0, low: 1, medium: 2, high: 3 };
-  assert.ok(rank[a2.confidence] >= rank[a1.confidence]);
+  assert.strictEqual(a.primary_action, "REDUCE"); // not PAUSE
+  assert.ok(!a.reason_codes.includes("REPEATED_WEAK_PERFORMANCE"));
 });
 
-test("repeated strength raises scale confidence", () => {
-  const e = strongAd({ ad_id: "ad-rep-s" });
-  const a1 = classifyMarketingEntity(
+test("overlapping 7/14/30 strong alone do NOT count as repeated strength", () => {
+  const e = strongAd({ ad_id: "ad-nest-s" });
+  const a = classifyMarketingEntity(
     {
       ...e,
       period_consistency: {
-        performance_direction: "STABLE",
-        weak_period_count: 0,
-        strong_period_count: 1,
+        trailing_window_consistency: {
+          trailing_direction: "STABLE",
+          strong_trailing_window_count: 3,
+          weak_trailing_window_count: 0,
+        },
+        independent_period_evidence: {
+          available: false,
+          independent_weak_period_count: null,
+          independent_strong_period_count: null,
+        },
+        strong_trailing_window_count: 3,
       },
     },
     bizCtx
   );
-  const a2 = classifyMarketingEntity(
+  assert.strictEqual(a.primary_action, "SCALE");
+  assert.ok(!a.reason_codes.includes("REPEATED_STRONG_PERFORMANCE"));
+  assert.notStrictEqual(a.scale_strength, "STRONG_SCALE");
+  // Nested windows alone must not promote confidence to high via persistence
+  // (may still be high from spend/purchase sample)
+});
+
+test("two independent weak buckets DO count as repeated weakness", () => {
+  const e = classifyMetaEntity(
+    {
+      ad_id: "ad-ind-w",
+      ad_name: "Indep weak",
+      spend: 12000,
+      purchases: 4,
+      cpa: 3000,
+      roas: 1.0,
+      impressions: 20000,
+      clicks: 400,
+      ctr: 2.0,
+    },
+    accountMeta,
+    { entity_type: "ad" }
+  );
+  const a = classifyMarketingEntity(
     {
       ...e,
       period_consistency: {
-        performance_direction: "STABLE",
-        weak_period_count: 0,
-        strong_period_count: 3,
+        trailing_window_consistency: {
+          trailing_direction: "WORSENING",
+          weak_trailing_window_count: 1,
+          strong_trailing_window_count: 0,
+        },
+        independent_period_evidence: {
+          available: true,
+          independent_periods_compared: 2,
+          independent_weak_period_count: 2,
+          independent_strong_period_count: 0,
+          by_period: {
+            recent_7d: "high_cpa",
+            previous_7d: "high_cpa",
+          },
+        },
       },
     },
     bizCtx
   );
-  assert.strictEqual(a2.primary_action, "SCALE");
-  const rank = { insufficient: 0, low: 1, medium: 2, high: 3 };
-  assert.ok(rank[a2.confidence] >= rank[a1.confidence]);
-  assert.ok(a2.reason_codes.includes("REPEATED_STRONG_PERFORMANCE"));
+  assert.strictEqual(a.primary_action, "PAUSE");
+  assert.ok(a.reason_codes.includes("REPEATED_WEAK_PERFORMANCE"));
+});
+
+test("two independent strong buckets DO count as repeated strength", () => {
+  const e = strongAd({ ad_id: "ad-ind-s" });
+  const a = classifyMarketingEntity(
+    {
+      ...e,
+      period_consistency: {
+        trailing_window_consistency: {
+          trailing_direction: "STABLE",
+          strong_trailing_window_count: 1,
+          weak_trailing_window_count: 0,
+        },
+        independent_period_evidence: {
+          available: true,
+          independent_periods_compared: 2,
+          independent_strong_period_count: 2,
+          independent_weak_period_count: 0,
+        },
+      },
+    },
+    {
+      ...bizCtx,
+      business_advertising_safety: { status: "large_safety_margin" },
+    }
+  );
+  assert.strictEqual(a.primary_action, "SCALE");
+  assert.ok(a.reason_codes.includes("REPEATED_STRONG_PERFORMANCE"));
+  assert.strictEqual(a.scale_strength, "STRONG_SCALE");
+});
+
+test("purchasing high-CPA cannot escalate REDUCE→PAUSE from nested windows alone", () => {
+  const e = classifyMetaEntity(
+    {
+      ad_id: "ad-hcpa",
+      ad_name: "High CPA",
+      spend: 10000,
+      purchases: 4,
+      cpa: 3000,
+      roas: 1.0,
+      impressions: 10000,
+      clicks: 300,
+      ctr: 3.0,
+    },
+    accountMeta,
+    { entity_type: "ad" }
+  );
+  assert.strictEqual(e.status, "high_cpa");
+  const a = classifyMarketingEntity(
+    {
+      ...e,
+      period_consistency: {
+        trailing_window_consistency: {
+          weak_trailing_window_count: 3,
+          strong_trailing_window_count: 0,
+        },
+        independent_period_evidence: { available: false },
+        weak_trailing_window_count: 3,
+      },
+    },
+    bizCtx
+  );
+  assert.strictEqual(a.primary_action, "REDUCE");
+});
+
+test("zero-purchase high-priority threshold can still PAUSE immediately", () => {
+  const e = classifyMetaEntity(
+    {
+      ad_id: "ad-zero2",
+      ad_name: "Zero",
+      spend: 3000,
+      purchases: 0,
+      impressions: 8000,
+      clicks: 100,
+      ctr: 1.2,
+    },
+    accountMeta,
+    { entity_type: "ad" }
+  );
+  assert.strictEqual(e.status, "high_priority_spend_no_purchase");
+  const a = classifyMarketingEntity(
+    {
+      ...e,
+      period_consistency: {
+        independent_period_evidence: { available: false },
+        trailing_window_consistency: { weak_trailing_window_count: 0 },
+      },
+    },
+    bizCtx
+  );
+  assert.strictEqual(a.primary_action, "PAUSE");
+});
+
+test("scale confidence not promoted to high from nested windows alone", () => {
+  const e = strongAd({ ad_id: "ad-sc-conf" });
+  const base = classifyMarketingEntity(
+    {
+      ...e,
+      period_consistency: {
+        trailing_window_consistency: {
+          strong_trailing_window_count: 0,
+          weak_trailing_window_count: 0,
+        },
+        independent_period_evidence: { available: false },
+      },
+    },
+    bizCtx
+  );
+  const nested = classifyMarketingEntity(
+    {
+      ...e,
+      period_consistency: {
+        trailing_window_consistency: {
+          strong_trailing_window_count: 3,
+          weak_trailing_window_count: 0,
+        },
+        independent_period_evidence: { available: false },
+        strong_trailing_window_count: 3,
+      },
+    },
+    bizCtx
+  );
+  assert.strictEqual(base.primary_action, "SCALE");
+  assert.strictEqual(nested.primary_action, "SCALE");
+  assert.strictEqual(nested.confidence, base.confidence);
+  assert.ok(!nested.reason_codes.includes("REPEATED_STRONG_PERFORMANCE"));
+  assert.notStrictEqual(nested.scale_strength, "STRONG_SCALE");
+});
+
+test("independent window ranges are non-overlapping 7+7+16", () => {
+  const {
+    buildIndependentWindowRanges,
+  } = require("../marketing/periods");
+  const r = buildIndependentWindowRanges("2026-09-06");
+  assert.strictEqual(r.recent_7d.until, "2026-09-06");
+  assert.strictEqual(r.recent_7d.since, "2026-08-31");
+  assert.strictEqual(r.previous_7d.until, "2026-08-30");
+  assert.strictEqual(r.previous_7d.since, "2026-08-24");
+  assert.strictEqual(r.prior_16d.until, "2026-08-23");
+  assert.strictEqual(r.prior_16d.since, "2026-08-08");
+  // No overlap
+  assert.ok(r.previous_7d.until < r.recent_7d.since);
+  assert.ok(r.prior_16d.until < r.previous_7d.since);
+});
+
+test("trailing direction helper still works (contextual)", () => {
+  const {
+    deriveTrailingWindowConsistency,
+  } = require("../marketing/periods");
+  const d = deriveTrailingWindowConsistency({
+    "7": "high_cpa",
+    "14": "high_cpa",
+    "30": "healthy",
+  });
+  assert.ok(["WORSENING", "STABLE"].includes(d.trailing_direction));
+  assert.ok(d.weak_trailing_window_count >= 2);
+  assert.ok(/overlap/i.test(d.note));
+});
+
+test("performance direction helper", () => {
+  const d = derivePerformanceDirection({
+    "7": "high_cpa",
+    "14": "high_cpa",
+    "30": "healthy",
+  });
+  assert.ok(["WORSENING", "STABLE"].includes(d.performance_direction));
+  assert.ok(d.weak_period_count >= 2);
 });
 
 test("immature FP attribution does not block Meta SCALE", () => {
@@ -572,16 +776,6 @@ test("no exact budget recommendation in report", () => {
   const blob = JSON.stringify(report);
   assert.ok(!/increase budget by \d+%/i.test(blob));
   assert.ok(!/\+30%/.test(blob));
-});
-
-test("performance direction helper", () => {
-  const d = derivePerformanceDirection({
-    "7": "high_cpa",
-    "14": "high_cpa",
-    "30": "healthy",
-  });
-  assert.ok(["WORSENING", "STABLE"].includes(d.performance_direction));
-  assert.ok(d.weak_period_count >= 2);
 });
 
 test("brief actions max 3", () => {

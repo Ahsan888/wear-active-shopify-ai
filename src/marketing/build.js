@@ -34,7 +34,8 @@ function countBy(actions, key, value) {
 /**
  * @param {object} input
  * @param {object} input.decisionReport - Phase 3 buildDecisionReport output (primary period)
- * @param {object} [input.periodClassified] - { "7": {ads,campaigns}, "14":..., "30":... }
+ * @param {object} [input.periodClassified] - trailing { "7"|"14"|"30": {ads,campaigns,meta_totals} }
+ * @param {object} [input.independentClassified] - { recent_7d|previous_7d|prior_16d: {ads,...} }
  * @param {object} [input.attributionEconomics]
  * @param {object} [input.pricingReport]
  * @param {object} [input.inventoryReport]
@@ -48,12 +49,12 @@ function buildMarketingDecisionReport(input = {}) {
   const ads = decision.ads || [];
   const campaigns = decision.campaigns || [];
 
-  const periodIndexes = {};
+  const trailingIndexes = {};
   const periodMeta = {};
   for (const days of ["7", "14", "30"]) {
     const snap = input.periodClassified?.[days];
     if (snap?.ads) {
-      periodIndexes[days] = indexEntitiesById(snap.ads);
+      trailingIndexes[days] = indexEntitiesById(snap.ads);
     }
     if (snap?.meta_totals) {
       periodMeta[days] = {
@@ -64,14 +65,41 @@ function buildMarketingDecisionReport(input = {}) {
       };
     }
   }
-  // Ensure primary period statuses are in index
-  periodIndexes[primaryDays] = indexEntitiesById(
+  trailingIndexes[primaryDays] = indexEntitiesById(
     ads.map((a) => ({ ...a, _period_days: primaryDays }))
   );
 
+  const independentIndexes = {};
+  const independentMeta = {};
+  const independentKeys = Object.keys(input.independentClassified || {});
+  const independentAvailable = independentKeys.length > 0;
+  for (const key of independentKeys) {
+    const snap = input.independentClassified[key];
+    if (snap?.ads) {
+      independentIndexes[key] = indexEntitiesById(snap.ads);
+    }
+    if (snap?.meta_totals || snap?.since) {
+      independentMeta[key] = {
+        since: snap.since || null,
+        until: snap.until || null,
+        spend: snap.meta_totals?.spend ?? null,
+        purchases: snap.meta_totals?.purchases ?? null,
+        cpa: snap.meta_totals?.cpa ?? null,
+        roas: snap.meta_totals?.roas ?? null,
+        error: snap.error || null,
+      };
+    }
+  }
+
+  const periodOpts = {
+    trailingIndexes,
+    independentIndexes,
+    independentAvailable,
+  };
+
   const adsWithPeriods = attachPeriodConsistency(
     ads.map((a) => ({ ...a, _period_days: primaryDays })),
-    periodIndexes
+    periodOpts
   );
 
   const mapLoaded =
@@ -121,18 +149,29 @@ function buildMarketingDecisionReport(input = {}) {
 
   const entityActions = classifyMarketingEntities(adsWithPeriods, ctx);
 
-  // Also classify top campaigns (for queue diversity) — avoid double-counting same story
-  const campaignIndexes = {};
+  // Also classify top campaigns
+  const campaignTrailing = {};
   for (const days of ["7", "14", "30"]) {
     const snap = input.periodClassified?.[days];
     if (snap?.campaigns) {
-      campaignIndexes[days] = indexEntitiesById(snap.campaigns);
+      campaignTrailing[days] = indexEntitiesById(snap.campaigns);
     }
   }
-  campaignIndexes[primaryDays] = indexEntitiesById(campaigns);
+  campaignTrailing[primaryDays] = indexEntitiesById(campaigns);
+  const campaignIndependent = {};
+  for (const key of independentKeys) {
+    const snap = input.independentClassified[key];
+    if (snap?.campaigns) {
+      campaignIndependent[key] = indexEntitiesById(snap.campaigns);
+    }
+  }
   const campaignsWithPeriods = attachPeriodConsistency(
     campaigns.map((c) => ({ ...c, _period_days: primaryDays })),
-    campaignIndexes
+    {
+      trailingIndexes: campaignTrailing,
+      independentIndexes: campaignIndependent,
+      independentAvailable,
+    }
   );
   const campaignActions = classifyMarketingEntities(campaignsWithPeriods, ctx);
 
@@ -247,6 +286,10 @@ function buildMarketingDecisionReport(input = {}) {
       customer: customer_context,
     },
     meta_periods: periodMeta,
+    meta_independent_periods: independentMeta,
+    period_evidence_note:
+      "Trailing 7/14/30 windows overlap (contextual). Independent recent_7d/previous_7d/prior_16d support REPEATED_* only.",
+    independent_periods_available: independentAvailable,
     summary: {
       entities_scored: entityActions.length,
       campaigns_scored: campaignActions.length,
@@ -271,7 +314,19 @@ function buildMarketingDecisionReport(input = {}) {
       ).length,
       inventory_constrained_count: inventory_constrained.length,
       confidence_distribution: confDist,
+      repeated_weak_entity_count: entityActions.filter((a) =>
+        a.reason_codes?.includes("REPEATED_WEAK_PERFORMANCE")
+      ).length,
+      repeated_strong_entity_count: entityActions.filter((a) =>
+        a.reason_codes?.includes("REPEATED_STRONG_PERFORMANCE")
+      ).length,
     },
+    repeated_weak_entities: entityActions.filter((a) =>
+      a.reason_codes?.includes("REPEATED_WEAK_PERFORMANCE")
+    ),
+    repeated_strong_entities: entityActions.filter((a) =>
+      a.reason_codes?.includes("REPEATED_STRONG_PERFORMANCE")
+    ),
     owner_action_queue: mergedQueue,
     scale_candidates: entityActions.filter((a) => a.primary_action === "SCALE"),
     hold: entityActions.filter((a) => a.primary_action === "HOLD"),

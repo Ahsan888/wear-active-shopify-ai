@@ -89,7 +89,8 @@ function assessMarketingEvidence(input = {}) {
 }
 
 /**
- * Per-entity confidence from spend/purchases + period consistency.
+ * Per-entity confidence from spend/purchases + independent period consistency.
+ * Overlapping trailing 7/14/30 agreement does NOT escalate confidence.
  */
 function entityEvidenceConfidence(entity, periodConsistency, opts = {}) {
   const spend = Number(entity?.spend) || 0;
@@ -109,19 +110,23 @@ function entityEvidenceConfidence(entity, periodConsistency, opts = {}) {
     level = "high";
   }
 
-  // Raise confidence when pattern repeats across periods
-  if (periodConsistency?.strong_period_count >= 2 && level !== "insufficient") {
+  const ind = periodConsistency?.independent_period_evidence;
+  const independentStrong =
+    ind?.available && Number(ind.independent_strong_period_count) >= 2;
+  const independentWeak =
+    ind?.available && Number(ind.independent_weak_period_count) >= 2;
+
+  if (independentStrong && level !== "insufficient") {
     if (level === "medium") level = "high";
     else if (level === "low") level = "medium";
   }
-  if (periodConsistency?.weak_period_count >= 2 && level !== "insufficient") {
+  if (independentWeak && level !== "insufficient") {
     if (level === "medium") level = "high";
     else if (level === "low") level = "medium";
   }
 
   if (opts.fp_immature) {
     // Cap presentation: Meta not FP-verified
-    // Keep decision confidence but note — do not force insufficient
   }
   if (opts.data_quality_block) {
     level = capConfidence(level, "low");

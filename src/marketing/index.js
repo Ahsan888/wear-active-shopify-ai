@@ -5,6 +5,11 @@ const { MARKETING } = require("./thresholds");
 const { assessMarketingEvidence, entityEvidenceConfidence } = require("./evidence");
 const {
   derivePerformanceDirection,
+  deriveTrailingWindowConsistency,
+  deriveIndependentPeriodEvidence,
+  buildIndependentWindowRanges,
+  hasIndependentRepeatedWeakness,
+  hasIndependentRepeatedStrength,
   attachPeriodConsistency,
   indexEntitiesById,
 } = require("./periods");
@@ -33,6 +38,11 @@ module.exports = {
   assessMarketingEvidence,
   entityEvidenceConfidence,
   derivePerformanceDirection,
+  deriveTrailingWindowConsistency,
+  deriveIndependentPeriodEvidence,
+  buildIndependentWindowRanges,
+  hasIndependentRepeatedWeakness,
+  hasIndependentRepeatedStrength,
   attachPeriodConsistency,
   indexEntitiesById,
   classifyMarketingEntity,

@@ -26,6 +26,7 @@ const {
 } = require("../marketing");
 
 const { trailingWindow } = require("../operations/dates");
+const { buildIndependentWindowRanges } = require("../marketing/periods");
 
 async function classifyPeriodMeta(since, until, gateOpts) {
   const meta = await fetchMetaBundle(since, until);
@@ -154,7 +155,7 @@ async function main() {
     accounting_scale_ok: decisionReport.gates?.suppress_scale !== true,
   };
 
-  // Comparable Meta windows
+  // Comparable overlapping Meta windows (contextual trend only)
   const periodClassified = {};
   const windows = [
     { days: 7 },
@@ -188,6 +189,39 @@ async function main() {
     }
   }
 
+  // Independent non-overlapping buckets (recent_7d / previous_7d / prior_16d)
+  const independentClassified = {};
+  const indepRanges = buildIndependentWindowRanges(dateRange.until);
+  for (const [key, range] of Object.entries(indepRanges)) {
+    try {
+      // Reuse trailing 7d fetch when dates match
+      const trailing7 = periodClassified["7"];
+      if (
+        key === "recent_7d" &&
+        trailing7 &&
+        !trailing7.error &&
+        trailing7.since === range.since &&
+        trailing7.until === range.until
+      ) {
+        independentClassified[key] = trailing7;
+      } else {
+        independentClassified[key] = await classifyPeriodMeta(
+          range.since,
+          range.until,
+          gateOpts
+        );
+      }
+    } catch (err) {
+      independentClassified[key] = {
+        error: String(err.message || err),
+        ads: [],
+        campaigns: [],
+        since: range.since,
+        until: range.until,
+      };
+    }
+  }
+
   const [invPricing, attributionEconomics] = await Promise.all([
     maybeLoadPricingInventory(dateRange),
     maybeLoadAttribution(dateRange),
@@ -199,6 +233,7 @@ async function main() {
       meta: inputs.meta,
     },
     periodClassified,
+    independentClassified,
     attributionEconomics,
     pricingReport: invPricing.pricingReport,
     inventoryReport: invPricing.inventoryReport,
