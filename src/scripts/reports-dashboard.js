@@ -226,6 +226,21 @@ async function main() {
     };
   }
 
+  // Phase 9 — marketing decision engine (advisory orchestration)
+  try {
+    const {
+      buildMarketingFromUnifiedBundle,
+    } = require("../marketing");
+    bundle.marketing_decisions = buildMarketingFromUnifiedBundle(bundle, {
+      primaryDays: args.days || 30,
+    });
+  } catch (err) {
+    bundle.marketing_decisions = {
+      error: String(err.message || err),
+      advisory_only: true,
+    };
+  }
+
   const html = renderUnifiedDashboard(bundle);
 
   const outDir = path.join(process.cwd(), "reports", "dashboard");

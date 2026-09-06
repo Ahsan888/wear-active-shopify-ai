@@ -178,6 +178,18 @@ function buildAttentionSection(alertsResult, config) {
 }
 
 function buildActionsSection(bundle) {
+  // Prefer Phase 9 marketing queue (max 3) when present
+  const mkt = bundle?.marketing_decisions;
+  if (mkt && !mkt.error && Array.isArray(mkt.owner_action_queue)) {
+    const {
+      formatMarketingBriefActions,
+    } = require("../marketing/build");
+    const lines = formatMarketingBriefActions(mkt, 3);
+    if (lines.length) {
+      return lines.map((l) => line(String(l.rank), l.text));
+    }
+  }
+
   const recs = (bundle.recommendations || [])
     .filter((r) => ["critical", "high", "medium", "low"].includes(r.priority))
     .sort((a, b) => (PRIORITY_RANK[a.priority] ?? 99) - (PRIORITY_RANK[b.priority] ?? 99))

@@ -152,6 +152,21 @@ async function runDailyReport(options = {}) {
     config,
   });
 
+  // Phase 9 — attach marketing decisions (same-period; advisory)
+  try {
+    const {
+      buildMarketingFromUnifiedBundle,
+    } = require("../marketing");
+    baseBundle.marketing_decisions = buildMarketingFromUnifiedBundle(baseBundle, {
+      primaryDays: days,
+    });
+  } catch (err) {
+    baseBundle.marketing_decisions = {
+      error: String(err.message || err),
+      advisory_only: true,
+    };
+  }
+
   // Stage: operational bundle for dashboard
   const operationalBundle = sanitizeBundleForEmbed({
     ...baseBundle,

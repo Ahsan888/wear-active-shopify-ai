@@ -1610,6 +1610,164 @@ function renderPricing(ctx) {
 </div>`;
 }
 
+function renderMarketingDecisions(ctx) {
+  const md = ctx.report?.marketing_decisions;
+  if (!md) {
+    return `<div id="view-marketing" class="view">
+  <section>
+    <div class="divider-label">MARKETING DECISION ENGINE</div>
+    <h2>Marketing Decisions</h2>
+    <p class="note">Not loaded. Run <code>npm run marketing:decisions</code> or regenerate the dashboard.</p>
+    <p class="note">Advisory only — no Meta mutations, no budget automation.</p>
+  </section>
+</div>`;
+  }
+  if (md.error) {
+    return `<div id="view-marketing" class="view">
+  <section>
+    <div class="divider-label">MARKETING DECISION ENGINE</div>
+    <h2>Marketing Decisions</h2>
+    <p class="note tone-bad">${escapeHtml(md.error)}</p>
+  </section>
+</div>`;
+  }
+
+  const s = md.summary || {};
+  const acc = md.account_decision || {};
+  const ev = md.evidence_quality || {};
+  const biz = md.business_context || {};
+
+  const queueRows = (md.owner_action_queue || [])
+    .slice(0, 10)
+    .map(
+      (a) => `<tr>
+      <td>${escapeHtml(a.priority || "—")}</td>
+      <td><strong>${escapeHtml(a.primary_action || "—")}</strong>${
+        a.secondary_action
+          ? `<div class="muted">${escapeHtml(a.secondary_action)}</div>`
+          : ""
+      }</td>
+      <td>${escapeHtml(a.entity_name || a.entity_id || "—")}</td>
+      <td>${money(a.spend)}</td>
+      <td>${escapeHtml(a.reason || (a.reason_codes || []).slice(0, 3).join(", "))}</td>
+      <td>${escapeHtml(a.confidence || "—")}</td>
+    </tr>`
+    )
+    .join("");
+
+  const actionTable = (list, cols = 6) => {
+    if (!list?.length) {
+      return `<tr><td colspan="${cols}" class="empty">None.</td></tr>`;
+    }
+    return list
+      .slice(0, 12)
+      .map(
+        (a) => `<tr>
+      <td>${escapeHtml(a.entity_name || a.entity_id || "—")}</td>
+      <td>${money(a.spend)}</td>
+      <td>${num(a.purchases, 0)}</td>
+      <td><strong>${escapeHtml(a.primary_action || "—")}</strong></td>
+      <td>${escapeHtml((a.reason_codes || []).slice(0, 3).join(", ") || "—")}</td>
+      <td>${escapeHtml(a.confidence || "—")}</td>
+    </tr>`
+      )
+      .join("");
+  };
+
+  const blockers = (md.data_quality?.blockers || [])
+    .slice(0, 20)
+    .map((b) => `<li>${escapeHtml(b)}</li>`)
+    .join("");
+
+  return `<div id="view-marketing" class="view">
+  <section>
+    <div class="divider-label">MARKETING DECISION ENGINE</div>
+    <h2>Account Recommendation</h2>
+    <p class="note">Three layers stay separate: business affordability · Meta platform · first-party attributed. Advisory only.</p>
+    <div class="grid">
+      ${card("Account", escapeHtml(acc.recommendation || "—"))}
+      ${card("Confidence", escapeHtml(acc.confidence || "—"))}
+      ${card("Business health", escapeHtml(biz.business_health?.status || "—"))}
+      ${card("Ad affordability", escapeHtml(biz.business_advertising_safety?.status || "—"))}
+      ${card("Evidence", escapeHtml(ev.marketing_evidence_confidence || "—"))}
+      ${card("FP attribution", escapeHtml(ev.fp_evidence?.status || "—"))}
+    </div>
+    <p class="note">${escapeHtml(acc.guidance || "")}</p>
+  </section>
+  <section>
+    <h2>Owner Action Queue</h2>
+    <table>
+      <thead><tr><th>P</th><th>Action</th><th>Entity</th><th>Spend</th><th>Why</th><th>Conf</th></tr></thead>
+      <tbody>${queueRows || `<tr><td colspan="6" class="empty">None.</td></tr>`}</tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Scale</h2>
+    <table>
+      <thead><tr><th>Entity</th><th>Spend</th><th>Purch</th><th>Action</th><th>Reasons</th><th>Conf</th></tr></thead>
+      <tbody>${actionTable(md.scale_candidates)}</tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Hold</h2>
+    <p class="muted">${num(s.hold_count, 0)} entities</p>
+  </section>
+  <section>
+    <h2>Reduce</h2>
+    <table>
+      <thead><tr><th>Entity</th><th>Spend</th><th>Purch</th><th>Action</th><th>Reasons</th><th>Conf</th></tr></thead>
+      <tbody>${actionTable(md.reduce_candidates)}</tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Pause</h2>
+    <table>
+      <thead><tr><th>Entity</th><th>Spend</th><th>Purch</th><th>Action</th><th>Reasons</th><th>Conf</th></tr></thead>
+      <tbody>${actionTable(md.pause_candidates)}</tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Creative Tests</h2>
+    <table>
+      <thead><tr><th>Entity</th><th>Spend</th><th>Purch</th><th>Action</th><th>Reasons</th><th>Conf</th></tr></thead>
+      <tbody>${actionTable(md.creative_tests)}</tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Promotion Tests</h2>
+    <p class="note">Secondary recommendation only — never auto-creates discounts.</p>
+    <table>
+      <thead><tr><th>Entity</th><th>Spend</th><th>Purch</th><th>Action</th><th>Reasons</th><th>Conf</th></tr></thead>
+      <tbody>${actionTable(md.promotion_tests)}</tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Inventory Constraints</h2>
+    <p class="note">Requires explicit entity↔product mapping. Unmapped entities stay UNKNOWN.</p>
+    <table>
+      <thead><tr><th>Entity</th><th>Spend</th><th>Purch</th><th>Action</th><th>Reasons</th><th>Conf</th></tr></thead>
+      <tbody>${actionTable(md.inventory_constraints)}</tbody>
+    </table>
+  </section>
+  <section>
+    <h2>Evidence Quality</h2>
+    <div class="grid">
+      ${card("Marketing", escapeHtml(ev.marketing_evidence_confidence || "—"))}
+      ${card("FP status", escapeHtml(ev.fp_evidence?.status || "—"))}
+      ${card("FP coverage", ev.fp_evidence?.attributed_coverage_pct == null ? "—" : pct(ev.fp_evidence.attributed_coverage_pct))}
+      ${card("Scale", num(s.scale_count, 0))}
+      ${card("Reduce", num(s.reduce_count, 0))}
+      ${card("Pause", num(s.pause_count, 0))}
+    </div>
+    <p class="note">${escapeHtml(ev.fp_evidence?.note || "")}</p>
+  </section>
+  <section>
+    <h2>Data Quality</h2>
+    <ul class="warn-list">${blockers || `<li class="empty">No blockers.</li>`}</ul>
+  </section>
+</div>`;
+}
+
 const STYLES = `
 :root {
   --bg: #f5f4f0;
@@ -2132,6 +2290,7 @@ function renderUnifiedDashboard(report) {
     ["inventory", "Inventory"],
     ["customers", "Customers"],
     ["pricing", "Pricing"],
+    ["marketing", "Marketing Decisions"],
     ["advertising", "Advertising"],
     ["decisions", "Decisions"],
     ["data-quality", "Data Quality"],
@@ -2181,6 +2340,7 @@ function renderUnifiedDashboard(report) {
     ${renderInventory(ctx)}
     ${renderCustomers(ctx)}
     ${renderPricing(ctx)}
+    ${renderMarketingDecisions(ctx)}
     ${renderAdvertising(ctx)}
     ${renderDecisions(ctx)}
     ${renderDataQuality(ctx)}

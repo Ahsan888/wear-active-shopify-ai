@@ -398,6 +398,22 @@ function buildTopActions(bundle, ownerAlerts, max = 3) {
     return true;
   };
 
+  // Phase 9 marketing actions first (calm, max 3)
+  const mkt = bundle?.marketing_decisions;
+  if (mkt && !mkt.error && Array.isArray(mkt.owner_action_queue)) {
+    try {
+      const {
+        formatMarketingBriefActions,
+      } = require("../marketing/build");
+      for (const row of formatMarketingBriefActions(mkt, max)) {
+        pushUnique(`Marketing: ${row.text}`);
+        if (out.length >= max) return out.slice(0, max);
+      }
+    } catch {
+      // fall through to legacy actions
+    }
+  }
+
   // Prefer actions tied to visible owner alerts first
   for (const a of ownerAlerts || []) {
     if (a.id?.includes("high_cpa") || a.id?.includes("spend_no_purchase")) {
