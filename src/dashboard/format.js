@@ -157,7 +157,7 @@ const TIPS = {
     "Actual Meta spend divided by all recognized business orders during the same period, including Shopify, Manual and Other Sales.",
   shopify_ad_load:
     "Actual Meta spend divided by recognized Shopify orders during the same period. This is blended context and does not mean every Shopify order came from Meta. Not CAC.",
-  meta_cpa: "Meta spend divided by purchases attributed by Meta.",
+  meta_cpa: "Meta-reported cost per purchase: spend divided by purchases attributed by Meta.",
   break_even_cpa:
     "Business profit available before ads divided by all recognized business orders. This is a business-wide safety threshold, not Meta-attributed CPA.",
   meta_adjusted_profit:
@@ -166,9 +166,13 @@ const TIPS = {
     "Accounting result using booked Ledger expenses (including booked Ads).",
   books_gross_margin:
     "Official Books gross margin using Ledger net revenue and all official COGS, including Gift/PR COGS.",
-  meta_roas: "Purchase value attributed by Meta divided by Meta spend.",
+  meta_roas: "Revenue reported by Meta per Rs 1 of ad spend.",
   blended_mer:
-    "Recognized business revenue divided by Meta spend; not attributed ROAS.",
+    "Total recognized revenue divided by Meta spend.",
+  gross_margin:
+    "Revenue left after product cost, before operating expenses.",
+  confidence:
+    "How much evidence supports this recommendation.",
   affordability:
     "Measures whether the overall business economics can absorb current Meta spend. Includes Shopify, Manual and Other Sales. It is not a measure of ecommerce acquisition efficiency.",
   shopify_contribution:

@@ -2105,8 +2105,81 @@ test("unified bundle passes paid_channel totals through", () => {
   assert.strictEqual(bundle.sales_mix.totals.paid_channel_cogs, 400);
 });
 
+// ——— Dashboard UX hardening coverage ———
+function marketingUxFixture(overrides = {}) {
+  return unifiedFixture({
+    marketing_decisions: {
+      summary: { scale_count: 0, hold_count: 1, reduce_count: 0, pause_count: 1 },
+      account_decision: { recommendation: "HOLD_SPEND", confidence: "high" },
+      evidence_quality: {
+        marketing_evidence_confidence: "medium",
+        fp_evidence: { status: "immature", attributed_coverage_pct: null },
+      },
+      owner_action_queue: [{
+        priority: "P1",
+        primary_action: "PAUSE",
+        entity_name: "Weak Ad",
+        spend: 2500,
+        purchases: 0,
+        meta_cpa: null,
+        confidence: "medium",
+        reason_codes: ["ZERO_PURCHASE_SPEND"],
+        reason: "Rs 2500 · ZERO_PURCHASE_SPEND",
+      }],
+      scale_candidates: [],
+      reduce_candidates: [],
+      pause_candidates: [],
+      creative_tests: [],
+      promotion_tests: [],
+      inventory_constraints: [],
+      data_quality: { blockers: [] },
+      ...overrides,
+    },
+  });
+}
+
+test("Marketing action queue uses owner-friendly labels and complete columns", () => {
+  const html = renderUnifiedDashboard(marketingUxFixture());
+  assert.ok(html.includes("Ranked action queue"));
+  for (const heading of ["Priority", "Action", "Ad / entity", "Why", "Spend", "Purchases", "CPA", "Confidence"]) {
+    assert.ok(html.includes(heading), `missing ${heading}`);
+  }
+  assert.ok(html.includes("Spent enough for a normal purchase but generated none."));
+  assert.ok(html.includes("Technical details"));
+  assert.ok(!/<strong>ZERO_PURCHASE_SPEND<\/strong>/.test(html));
+});
+
+test("account posture has a clear explanation", () => {
+  const html = renderUnifiedDashboard(marketingUxFixture());
+  assert.ok(html.includes("Account posture"));
+  assert.ok(html.includes("HOLD SPEND"));
+  assert.ok(html.includes("Keep the account steady and act on weak ads individually."));
+});
+
+test("Overview renders a Top 5 action queue", () => {
+  const html = renderUnifiedDashboard(marketingUxFixture());
+  assert.ok(html.includes("Top 5 actions"));
+  assert.ok(html.includes("Weak Ad"));
+  assert.ok(html.includes("priority-P1"));
+});
+
+test("null and insufficient states are explicit", () => {
+  const html = renderUnifiedDashboard(marketingUxFixture());
+  assert.ok(html.includes("No purchases"));
+  assert.ok(html.includes("First-party attribution is still collecting data."));
+  assert.ok(html.includes("No scale candidates currently meet the evidence threshold."));
+  assert.ok(html.includes("No product mapping exists yet, so inventory constraints cannot be applied to Meta ads."));
+});
+
+test("print rendering expands details and preserves all views", () => {
+  const html = renderUnifiedDashboard(marketingUxFixture());
+  assert.ok(html.includes("beforeprint"));
+  assert.ok(html.includes("afterprint"));
+  assert.ok(/@media print[\s\S]*\.view \{ display: block !important/.test(html));
+  assert.ok(/details\.secondary-section > \* \{ display: block !important/.test(html));
+});
+
 if (!process.exitCode) {
   console.log("\nAll dashboard / sales-mix / unified reporting tests passed.");
 }
-
 
