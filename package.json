@@ -67,7 +67,9 @@
     "packs:setup": "node src/scripts/setup-product-packs.js",
     "complete-look:setup": "node src/scripts/setup-complete-look.js",
     "stock:low": "node src/scripts/low-stock-alert.js",
-    "stock:low:send": "node src/scripts/low-stock-alert.js --send"
+    "stock:low:send": "node src/scripts/low-stock-alert.js --send",
+    "inventory:report": "node src/scripts/inventory-report.js",
+    "inventory:test": "node src/scripts/inventory-self-test.js"
   },
   "keywords": [
     "shopify",
