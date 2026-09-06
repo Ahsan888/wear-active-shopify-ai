@@ -73,7 +73,9 @@
     "customers:report": "node src/scripts/customers-report.js",
     "customers:test": "node src/scripts/customers-self-test.js",
     "pricing:report": "node src/scripts/pricing-report.js",
-    "pricing:test": "node src/scripts/pricing-self-test.js"
+    "pricing:test": "node src/scripts/pricing-self-test.js",
+    "marketing:decisions": "node src/scripts/marketing-decisions.js",
+    "marketing:test": "node src/scripts/marketing-self-test.js"
   },
   "keywords": [
     "shopify",
