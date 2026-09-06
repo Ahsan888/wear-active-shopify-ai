@@ -7,6 +7,7 @@ const { resolveThresholds } = require("./thresholds");
 const { demandForSku } = require("./demand");
 const {
   avgDailyUnits,
+  parseStock,
   daysOfCover,
   classifyStock,
   classifyDemandTrend,
@@ -18,6 +19,16 @@ const {
 
 function productKey(productTitle, handle) {
   return String(productTitle || handle || "Unknown").trim() || "Unknown";
+}
+
+function looksLikeBundleOrSet(product, variant) {
+  const text = `${product || ""} ${variant || ""}`;
+  return /\b(set|bundle|pack)\b/i.test(text);
+}
+
+function stockUnits(value) {
+  const n = parseStock(value);
+  return n == null ? 0 : n;
 }
 
 /**
@@ -36,55 +47,105 @@ function buildInventoryReport(opts = {}) {
   const until = opts.period?.until || demandWindows?.until;
 
   const skuRows = [];
-  const seenSku = new Set();
   const warnings = [];
   const missingCostSkus = [];
   const missingVmSkus = [];
   const missingSkuVariants = [];
   const negativeStock = [];
   const salesWithoutInventory = [];
+  const duplicateSkuDetails = [];
 
-  // Index Shopify by SKU (first wins; duplicates flagged)
-  const bySku = new Map();
+  // Group Shopify variants by SKU — never sum duplicates
+  const variantsBySku = new Map();
+  let shopifyVariantCount = 0;
+  let missingSkuVariantCount = 0;
+  let unkeyedInventoryUnits = 0;
+  let unkeyedLikelyBundleUnits = 0;
+  let unkeyedOtherUnits = 0;
+
   for (const v of variants) {
+    shopifyVariantCount += 1;
     const sku = v.sku ? String(v.sku).trim() : "";
+    const units = stockUnits(v.current_stock);
     if (!sku) {
-      missingSkuVariants.push({
+      missingSkuVariantCount += 1;
+      const entry = {
         product: v.product,
         variant: v.variant,
         current_stock: v.current_stock,
-      });
+        likely_virtual_bundle: looksLikeBundleOrSet(v.product, v.variant),
+      };
+      missingSkuVariants.push(entry);
+      unkeyedInventoryUnits += units;
+      if (entry.likely_virtual_bundle) unkeyedLikelyBundleUnits += units;
+      else unkeyedOtherUnits += units;
       continue;
     }
-    if (bySku.has(sku)) {
-      warnings.push(`duplicate_shopify_sku:${sku}`);
-      // Prefer summing stock for same SKU across variants (rare) — report both
-      const prev = bySku.get(sku);
-      const a = Number(prev.current_stock);
-      const b = Number(v.current_stock);
-      if (Number.isFinite(a) && Number.isFinite(b)) {
-        prev.current_stock = a + b;
-        prev._duplicate_merged = true;
-      }
-      continue;
-    }
-    bySku.set(sku, { ...v, sku });
+    if (!variantsBySku.has(sku)) variantsBySku.set(sku, []);
+    variantsBySku.get(sku).push({ ...v, sku });
   }
 
-  // Union of Shopify SKUs + demand SKUs (sales without inventory match)
+  const duplicateSkus = new Set();
+  for (const [sku, list] of variantsBySku.entries()) {
+    if (list.length <= 1) continue;
+    duplicateSkus.add(sku);
+    duplicateSkuDetails.push({
+      sku,
+      variant_count: list.length,
+      variants: list.map((x) => ({
+        product: x.product,
+        variant: x.variant,
+        current_stock: x.current_stock,
+        variant_id: x.variant_id || null,
+      })),
+      quantities: list.map((x) => x.current_stock),
+    });
+    warnings.push(
+      `duplicate_shopify_sku:${sku} variants=${list.length} qtys=[${list
+        .map((x) => x.current_stock)
+        .join(",")}]`
+    );
+  }
+
+  let skuAddressableVariantCount = 0;
+  let skuAddressableUnits = 0;
+  let duplicateSkuVariantCount = 0;
+  let duplicateSkuUnitsExcluded = 0;
+
+  for (const [sku, list] of variantsBySku.entries()) {
+    if (duplicateSkus.has(sku)) {
+      duplicateSkuVariantCount += list.length;
+      for (const x of list) duplicateSkuUnitsExcluded += stockUnits(x.current_stock);
+      continue;
+    }
+    skuAddressableVariantCount += 1;
+    skuAddressableUnits += stockUnits(list[0].current_stock);
+  }
+
+  // Safe total excludes duplicate-SKU variants (ambiguous). Unkeyed reported separately.
+  // Bundle/set no-SKU variants are identified but still counted in unkeyed (not mixed into headline).
+  const totalShopifyInventoryUnitsIfSafe = round2(
+    skuAddressableUnits + unkeyedInventoryUnits
+  );
+
   const allSkus = new Set([
-    ...bySku.keys(),
+    ...variantsBySku.keys(),
     ...(demandWindows?.demand_30d?.keys?.() || []),
+    ...(demandWindows?.demand_90d?.keys?.() || []),
   ]);
 
   for (const sku of allSkus) {
-    seenSku.add(sku);
-    const inv = bySku.get(sku) || null;
+    const list = variantsBySku.get(sku) || [];
+    const isDuplicate = duplicateSkus.has(sku);
+    const inv = !isDuplicate && list.length === 1 ? list[0] : null;
     const vm = catalogBySku[sku] || null;
     const dem = demandForSku(demandWindows, sku);
     const dq = [];
 
-    if (!inv) {
+    if (isDuplicate) {
+      dq.push("duplicate_shopify_sku");
+    }
+    if (!list.length) {
       dq.push("sales_without_inventory_match");
       salesWithoutInventory.push(sku);
     }
@@ -100,24 +161,45 @@ function buildInventoryReport(opts = {}) {
       dq.push("missing_cost");
       missingCostSkus.push(sku);
     }
-    if (inv && inv.current_stock == null) {
-      dq.push("missing_shopify_inventory");
+
+    const stockTrusted = Boolean(inv) && !isDuplicate;
+    let stock = null;
+    if (isDuplicate) {
+      stock = null;
+      dq.push("untrusted_duplicate_inventory");
+    } else if (inv) {
+      if (inv.current_stock == null || inv.current_stock === "") {
+        dq.push("missing_shopify_inventory");
+        stock = null;
+      } else {
+        stock = parseStock(inv.current_stock);
+        if (stock == null) dq.push("missing_shopify_inventory");
+      }
     }
-    const stock = inv?.current_stock == null ? null : Number(inv.current_stock);
+
     if (stock != null && stock < 0) {
       dq.push("negative_stock");
       negativeStock.push(sku);
     }
-    if (inv && stock != null && stock > 0 && dem.units_sold_30d === 0) {
+    if (stockTrusted && stock != null && stock > 0 && dem.units_sold_90d === 0) {
       dq.push("inventory_without_sales_history");
+    } else if (
+      stockTrusted &&
+      stock != null &&
+      stock > 0 &&
+      dem.units_sold_30d === 0 &&
+      dem.units_sold_90d > 0
+    ) {
+      dq.push("no_recent_30d_demand");
     }
 
     const avgDaily = avgDailyUnits(dem.units_sold_30d, 30);
     const doc = daysOfCover(stock, dem.units_sold_30d);
     const stockClass = classifyStock(
-      stock == null ? null : stock,
+      stock,
       doc,
       dem.units_sold_30d,
+      dem.units_sold_90d,
       thresholds
     );
     const trend = classifyDemandTrend(
@@ -131,41 +213,59 @@ function buildInventoryReport(opts = {}) {
       units_sold_30d: dem.units_sold_30d,
       demand_trend: trend,
       gross_margin_pct: dem.gross_margin_pct,
+      stock_trusted: stockTrusted,
       thresholds,
     });
     const restockQty = recommendedRestockQty({
       current_stock: stock,
       units_sold_30d: dem.units_sold_30d,
       action,
+      stock_trusted: stockTrusted,
       thresholds,
     });
 
-    const inventoryValue =
-      stock != null && unitCost != null && stock > 0
-        ? round2(stock * unitCost)
-        : stock != null && unitCost != null && stock === 0
-          ? 0
-          : null;
+    // Trusted valuation only — duplicates and missing cost excluded
+    let inventoryValue = null;
+    if (stockTrusted && stock != null && unitCost != null) {
+      inventoryValue = stock > 0 ? round2(stock * unitCost) : 0;
+    }
 
     const row = {
       sku,
-      product: inv?.product || vm?.product || dem.product || null,
+      product:
+        inv?.product ||
+        list[0]?.product ||
+        vm?.product ||
+        dem.product ||
+        null,
       variant: inv?.variant || null,
       size: inv?.size || "",
       color: inv?.color || "",
       current_stock: stock,
+      stock_trusted: stockTrusted,
+      duplicate_variants: isDuplicate
+        ? list.map((x) => ({
+            product: x.product,
+            variant: x.variant,
+            current_stock: x.current_stock,
+            variant_id: x.variant_id || null,
+          }))
+        : null,
       unit_cost: unitCost,
       inventory_value: inventoryValue,
       units_sold_7d: dem.units_sold_7d,
       units_sold_14d: dem.units_sold_14d,
       units_sold_30d: dem.units_sold_30d,
+      units_sold_90d: dem.units_sold_90d,
       revenue_30d: dem.revenue_30d,
       gross_profit_30d: dem.gross_profit_30d,
       gross_margin_pct: dem.gross_margin_pct,
       avg_daily_units_30d: round2(avgDaily),
       days_of_cover: doc,
       stock_class: stockClass,
-      stockout_risk: ["OUT_OF_STOCK", "CRITICAL", "LOW"].includes(stockClass),
+      stockout_risk:
+        stockTrusted &&
+        ["OUT_OF_STOCK", "CRITICAL", "LOW"].includes(stockClass),
       sell_through_class: stockClass,
       demand_trend: trend,
       recommended_action: action,
@@ -174,7 +274,7 @@ function buildInventoryReport(opts = {}) {
       data_quality_warnings: dq,
       confidence: null,
       priority_score: 0,
-      in_shopify: Boolean(inv),
+      in_shopify: list.length > 0,
       in_variant_master: Boolean(vm),
     };
     row.confidence = confidenceForSku(row);
@@ -183,12 +283,13 @@ function buildInventoryReport(opts = {}) {
   }
 
   for (const miss of missingSkuVariants) {
+    const tag = miss.likely_virtual_bundle ? "likely_bundle_set" : "unkeyed";
     warnings.push(
-      `missing_sku:${miss.product || "?"} / ${miss.variant || "?"} stock=${miss.current_stock}`
+      `missing_sku(${tag}):${miss.product || "?"} / ${miss.variant || "?"} stock=${miss.current_stock}`
     );
   }
 
-  // Product aggregation — surface worst variant risk
+  // Product aggregation — trusted SKUs only for stock totals
   const productMap = new Map();
   for (const row of skuRows) {
     const key = productKey(row.product, row.sku);
@@ -211,10 +312,12 @@ function buildInventoryReport(opts = {}) {
     }
     const p = productMap.get(key);
     p.skus.push(row.sku);
-    if (row.current_stock != null) p.current_stock += row.current_stock;
+    if (row.stock_trusted && row.current_stock != null) {
+      p.current_stock += row.current_stock;
+    }
     if (row.inventory_value != null) {
       p.inventory_value = round2(p.inventory_value + row.inventory_value);
-    } else if (row.current_stock > 0) {
+    } else if (row.stock_trusted && row.current_stock > 0) {
       p.inventory_value_known = false;
     }
     p.units_sold_30d += row.units_sold_30d;
@@ -231,10 +334,11 @@ function buildInventoryReport(opts = {}) {
     CRITICAL: 1,
     LOW: 2,
     NO_DEMAND: 3,
-    OVERSTOCK: 4,
-    HIGH: 5,
-    HEALTHY: 6,
-    UNKNOWN: 7,
+    NO_RECENT_DEMAND: 4,
+    OVERSTOCK: 5,
+    HIGH: 6,
+    HEALTHY: 7,
+    UNKNOWN: 8,
   };
   for (const p of productMap.values()) {
     let worst = "HEALTHY";
@@ -250,7 +354,9 @@ function buildInventoryReport(opts = {}) {
     }
     p.worst_stock_class = worst;
     p.sku_count = p.skus.length;
-    p.inventory_value = p.inventory_value_known ? round2(p.inventory_value) : null;
+    p.inventory_value = p.inventory_value_known
+      ? round2(p.inventory_value)
+      : null;
     p.avg_daily_units_30d = round2(avgDailyUnits(p.units_sold_30d, 30));
     p.days_of_cover =
       p.units_sold_30d > 0 && p.current_stock != null
@@ -260,28 +366,34 @@ function buildInventoryReport(opts = {}) {
 
   const products = [...productMap.values()].sort(
     (a, b) =>
-      Number(b.has_variant_stockout_risk) - Number(a.has_variant_stockout_risk) ||
+      Number(b.has_variant_stockout_risk) -
+        Number(a.has_variant_stockout_risk) ||
       b.units_sold_30d - a.units_sold_30d
   );
 
-  // Summaries — inventory value excludes missing-cost SKUs
-  const valued = skuRows.filter((r) => r.inventory_value != null);
-  const totalUnits = skuRows.reduce(
-    (s, r) => s + (Number.isFinite(r.current_stock) ? r.current_stock : 0),
-    0
+  // Trusted valued rows only
+  const valued = skuRows.filter(
+    (r) => r.stock_trusted && r.inventory_value != null
   );
   const totalInventoryValue = round2(
     valued.reduce((s, r) => s + (r.inventory_value || 0), 0)
   );
-  const atRiskClasses = new Set(["OVERSTOCK", "NO_DEMAND"]);
-  const slowDeadValue = round2(
-    valued
-      .filter((r) => atRiskClasses.has(r.stock_class))
-      .reduce((s, r) => s + (r.inventory_value || 0), 0)
-  );
+
+  // Capital buckets — mutually exclusive by stock_class (no double count)
+  const sumClassValue = (cls) =>
+    round2(
+      valued
+        .filter((r) => r.stock_class === cls)
+        .reduce((s, r) => s + (r.inventory_value || 0), 0)
+    );
+
+  const deadInventoryValue = sumClassValue("NO_DEMAND");
+  const noRecentDemandValue = sumClassValue("NO_RECENT_DEMAND");
+  const overstockValue = sumClassValue("OVERSTOCK");
+  const capitalAtRiskValue = round2(deadInventoryValue + overstockValue);
   const capitalAtRiskPct =
     totalInventoryValue > 0
-      ? round2((slowDeadValue / totalInventoryValue) * 100)
+      ? round2((capitalAtRiskValue / totalInventoryValue) * 100)
       : null;
 
   const byClass = {};
@@ -299,6 +411,7 @@ function buildInventoryReport(opts = {}) {
     .filter(
       (r) =>
         r.stock_class === "NO_DEMAND" ||
+        r.stock_class === "NO_RECENT_DEMAND" ||
         r.stock_class === "OVERSTOCK" ||
         r.recommended_action === "CLEARANCE_CANDIDATE"
     )
@@ -313,6 +426,9 @@ function buildInventoryReport(opts = {}) {
   const lowSkus = skuRows.filter((r) => r.stock_class === "LOW");
   const overstockSkus = skuRows.filter((r) => r.stock_class === "OVERSTOCK");
   const noDemandSkus = skuRows.filter((r) => r.stock_class === "NO_DEMAND");
+  const noRecentSkus = skuRows.filter(
+    (r) => r.stock_class === "NO_RECENT_DEMAND"
+  );
   const oosSkus = skuRows.filter((r) => r.stock_class === "OUT_OF_STOCK");
 
   return {
@@ -329,23 +445,53 @@ function buildInventoryReport(opts = {}) {
       demand:
         "Books Ledger recognized Sale units (gift/PR excluded; refunds per Books rules)",
       unit_cost: "Variant Master CostPerItem",
+      dead_stock_window: "90d recognized sales for NO_DEMAND; 30d soft NO_RECENT_DEMAND",
     },
     summary: {
       sku_count: skuRows.length,
       product_count: products.length,
-      total_units: round2(totalUnits),
+      // Headline units = trusted SKU-addressable only (excludes no-SKU + duplicate SKUs)
+      total_units: round2(skuAddressableUnits),
+      total_units_scope:
+        "SKU-addressable trusted variants only (excludes missing-SKU and duplicate-SKU variants)",
+      shopify_variant_count: shopifyVariantCount,
+      sku_addressable_variant_count: skuAddressableVariantCount,
+      missing_sku_variant_count: missingSkuVariantCount,
+      duplicate_sku_variant_count: duplicateSkuVariantCount,
+      duplicate_sku_count: duplicateSkus.size,
+      sku_addressable_units: round2(skuAddressableUnits),
+      unkeyed_inventory_units: round2(unkeyedInventoryUnits),
+      unkeyed_likely_bundle_set_units: round2(unkeyedLikelyBundleUnits),
+      unkeyed_other_units: round2(unkeyedOtherUnits),
+      duplicate_sku_units_excluded: round2(duplicateSkuUnitsExcluded),
+      total_shopify_inventory_units_if_safe: totalShopifyInventoryUnitsIfSafe,
       total_inventory_value: totalInventoryValue,
       inventory_value_excludes_missing_cost: true,
+      inventory_value_excludes_duplicate_skus: true,
       missing_cost_sku_count: new Set(missingCostSkus).size,
-      slow_dead_inventory_value: slowDeadValue,
+      no_recent_demand_value: noRecentDemandValue,
+      dead_inventory_value: deadInventoryValue,
+      overstock_value: overstockValue,
+      capital_at_risk_value: capitalAtRiskValue,
       capital_at_risk_pct: capitalAtRiskPct,
+      // Back-compat alias: capital at risk (dead + overstock), not 30d soft
+      slow_dead_inventory_value: capitalAtRiskValue,
       by_class: byClass,
       critical_sku_count: criticalSkus.length,
       low_sku_count: lowSkus.length,
       overstock_sku_count: overstockSkus.length,
       no_demand_sku_count: noDemandSkus.length,
+      no_recent_demand_sku_count: noRecentSkus.length,
       out_of_stock_sku_count: oosSkus.length,
       restock_priority_count: restockPriorities.length,
+    },
+    notes: {
+      unkeyed_inventory:
+        "Variants without SKUs are excluded from headline SKU-addressable units. Titles matching Set/Bundle/Pack are tagged likely_virtual_bundle and reported under unkeyed_likely_bundle_set_units — they may represent virtual/combo inventory rather than extra physical units.",
+      duplicate_skus:
+        "Duplicate Shopify SKUs are excluded from trusted stock, valuation, and restock math. Variant-level quantities are listed in data_quality.duplicate_skus.",
+      capital_at_risk:
+        "capital_at_risk_value = dead_inventory_value (NO_DEMAND / 90d) + overstock_value. no_recent_demand_value (30d soft) is reported separately and not included.",
     },
     skus: skuRows.sort((a, b) => b.priority_score - a.priority_score),
     products,
@@ -362,16 +508,13 @@ function buildInventoryReport(opts = {}) {
         ...[...new Set(missingVmSkus)].map((s) => `missing_variant_master:${s}`),
         ...salesWithoutInventory.map((s) => `sales_without_inventory:${s}`),
         ...negativeStock.map((s) => `negative_stock:${s}`),
-        ...missingSkuVariants.map(
-          (m) =>
-            `missing_sku_on_variant:${m.product}/${m.variant} stock=${m.current_stock}`
-        ),
       ],
       missing_cost_skus: [...new Set(missingCostSkus)],
       missing_variant_master_skus: [...new Set(missingVmSkus)],
       sales_without_inventory: salesWithoutInventory,
       negative_stock_skus: negativeStock,
       missing_sku_variants: missingSkuVariants,
+      duplicate_skus: duplicateSkuDetails,
     },
   };
 }
@@ -379,4 +522,5 @@ function buildInventoryReport(opts = {}) {
 module.exports = {
   buildInventoryReport,
   productKey,
+  looksLikeBundleOrSet,
 };

@@ -1205,16 +1205,23 @@ function renderInventory(ctx) {
   <section>
     <div class="divider-label">INVENTORY &amp; DEMAND INTELLIGENCE</div>
     <h2>Inventory Overview</h2>
-    <p class="note">Shopify sellable stock × Variant Master cost; demand from recognized Ledger sales (gift/PR excluded). Advisory only — no inventory mutations or POs.</p>
+    <p class="note">Shopify sellable stock × Variant Master cost; demand from recognized Ledger sales (gift/PR excluded). Headline units are SKU-addressable trusted only. Advisory only — no inventory mutations or POs.</p>
     <div class="grid">
-      ${card("Total units", num(s.total_units, 0))}
-      ${card("Inventory value", money(s.total_inventory_value), `excludes ${num(s.missing_cost_sku_count, 0)} missing-cost SKUs`)}
-      ${card("Slow/dead value", money(s.slow_dead_inventory_value))}
-      ${card("Capital at risk", s.capital_at_risk_pct == null ? "—" : pct(s.capital_at_risk_pct))}
+      ${card("SKU-addressable units", num(s.total_units, 0), escapeHtml(s.total_units_scope || "Trusted SKUs only"))}
+      ${card("Unkeyed units", num(s.unkeyed_inventory_units, 0), `bundle/set≈${num(s.unkeyed_likely_bundle_set_units, 0)}`)}
+      ${card("Safe Shopify total", num(s.total_shopify_inventory_units_if_safe, 0), "addressable + unkeyed; excl duplicate SKUs")}
+      ${card("Inventory value", money(s.total_inventory_value), `excl missing-cost + duplicate SKUs`)}
+      ${card("No-recent-demand value", money(s.no_recent_demand_value), "30d soft — not in capital at risk")}
+      ${card("Dead inventory (90d)", money(s.dead_inventory_value))}
+      ${card("Overstock value", money(s.overstock_value))}
+      ${card("Capital at risk", s.capital_at_risk_pct == null ? "—" : pct(s.capital_at_risk_pct), money(s.capital_at_risk_value))}
       ${card("Critical", num(s.critical_sku_count, 0), "", "bad")}
       ${card("Low stock", num(s.low_sku_count, 0), "", "warn")}
-      ${card("Overstock", num(s.overstock_sku_count, 0))}
-      ${card("No demand", num(s.no_demand_sku_count, 0))}
+      ${card("Overstock SKUs", num(s.overstock_sku_count, 0))}
+      ${card("No demand 90d", num(s.no_demand_sku_count, 0))}
+      ${card("No recent 30d", num(s.no_recent_demand_sku_count, 0))}
+      ${card("Missing-SKU variants", num(s.missing_sku_variant_count, 0))}
+      ${card("Duplicate SKU variants", num(s.duplicate_sku_variant_count, 0), `excl ${num(s.duplicate_sku_units_excluded, 0)} units`)}
     </div>
   </section>
   <section>

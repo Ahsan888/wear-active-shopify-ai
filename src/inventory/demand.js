@@ -38,12 +38,8 @@ function productsToSkuMap(products = []) {
 }
 
 /**
- * Build 7d / 14d / 30d demand maps ending on `until`.
- *
- * @param {object[]} ledgerRows
- * @param {string[]} ledgerHeader
- * @param {string} until YYYY-MM-DD
- * @param {object} catalogBySku Variant Master bySku
+ * Build 7d / 14d / 30d / 90d demand maps ending on `until`.
+ * 7/14/30 → velocity & restock; 90 → dead-stock (NO_DEMAND) classification.
  */
 function buildDemandWindows(ledgerRows, ledgerHeader, until, catalogBySku = {}) {
   const u = assertYmd(until, "until");
@@ -51,6 +47,7 @@ function buildDemandWindows(ledgerRows, ledgerHeader, until, catalogBySku = {}) 
     d7: windowEnding(u, 7),
     d14: windowEnding(u, 14),
     d30: windowEnding(u, 30),
+    d90: windowEnding(u, 90),
   };
 
   function agg(w) {
@@ -70,6 +67,7 @@ function buildDemandWindows(ledgerRows, ledgerHeader, until, catalogBySku = {}) 
     demand_7d: agg(windows.d7),
     demand_14d: agg(windows.d14),
     demand_30d: agg(windows.d30),
+    demand_90d: agg(windows.d90),
   };
 }
 
@@ -78,11 +76,14 @@ function demandForSku(demandWindows, sku) {
   const d7 = demandWindows.demand_7d.get(key);
   const d14 = demandWindows.demand_14d.get(key);
   const d30 = demandWindows.demand_30d.get(key);
+  const d90 = demandWindows.demand_90d?.get?.(key);
   return {
-    product: d30?.product || d14?.product || d7?.product || null,
+    product:
+      d30?.product || d90?.product || d14?.product || d7?.product || null,
     units_sold_7d: d7?.units || 0,
     units_sold_14d: d14?.units || 0,
     units_sold_30d: d30?.units || 0,
+    units_sold_90d: d90?.units || 0,
     revenue_30d: d30?.revenue_ex_tax || 0,
     cogs_30d: d30?.cogs || 0,
     gross_profit_30d: d30?.gross_profit || 0,
