@@ -2156,9 +2156,9 @@ test("account posture has a clear explanation", () => {
   assert.ok(html.includes("Keep the account steady and act on weak ads individually."));
 });
 
-test("Overview renders a Top 5 action queue", () => {
+test("Overview renders Do This Today action queue", () => {
   const html = renderUnifiedDashboard(marketingUxFixture());
-  assert.ok(html.includes("Top 5 actions"));
+  assert.ok(html.includes("Do This Today") || html.includes("Top 5 actions"));
   assert.ok(html.includes("Weak Ad"));
   assert.ok(html.includes("priority-P1"));
 });

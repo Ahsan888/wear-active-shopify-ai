@@ -13,9 +13,11 @@ const {
   tip,
   TIPS,
   formatCpaEvidenceHtml,
+  sourceBadgeHtml,
 } = require("./format");
 const { groupRecommendationsByPriority } = require("./groups");
 const { enrichProductGroups } = require("./bundle");
+const { tipText } = require("./metrics");
 
 const CHANNEL_ORDER = ["Shopify", "Manual", "Other Sales"];
 
@@ -36,13 +38,22 @@ const OPPORTUNITY_STATUSES = [
 
 const RISK_STATUSES = ["negative_margin", "high_volume_weak_margin"];
 
-function card(label, value, sub = "", tone = "neutral", tipText = null) {
-  const tipHtml = tipText ? ` ${tip(tipText)}` : "";
+function card(label, value, sub = "", tone = "neutral", tipTextArg = null, source = null) {
+  const tipHtml = tipTextArg ? ` ${tip(tipTextArg)}` : "";
+  const badge = source ? ` ${sourceBadgeHtml(source)}` : "";
   return `<div class="card tone-${tone}">
-    <div class="card-label">${escapeHtml(label)}${tipHtml}</div>
+    <div class="card-label">${escapeHtml(label)}${tipHtml}${badge}</div>
     <div class="card-value">${value}</div>
     ${sub ? `<div class="card-sub">${sub}</div>` : ""}
   </div>`;
+}
+
+function statusTone(status) {
+  const s = String(status || "").toUpperCase();
+  if (/HEALTHY|PROFITABLE|CONTRIBUTING|OK|USABLE|HOLD|MONITOR|OBSERVED/.test(s)) return "ok";
+  if (/ATTENTION|NEAR|EXCESS|RESTOCK|COLLECTING|REVIEW|WARN|LIMITED|NEGATIVE/.test(s)) return "warn";
+  if (/UNPROFITABLE|PAUSE|CRITICAL|BAD|ABOVE/.test(s)) return "bad";
+  return "neutral";
 }
 
 function resolveProductGroups(report) {
@@ -354,35 +365,68 @@ function renderTrendsSection(operational, cur) {
 
 function renderOverview(ctx) {
   const { cur, bh, bas, books, p, sc, totals, conc } = ctx;
+  const exec = ctx.report.executive || {};
+  const fc = ctx.report.forecast || {};
   const md = ctx.report.marketing_decisions || {};
   const inv = ctx.report.inventory?.summary || {};
+  const fresh = exec.freshness || {};
   const profitable = Number(p.meta_adjusted_profit) >= 0;
   const affordable = !["above_break_even", "unprofitable"].includes(bas.status);
   const shopifyHealthy = Number(sc.contribution_after_meta) >= 0;
   const inventoryRisk = Number(inv.capital_at_risk_pct || 0) >= 50;
-  const urgent = (md.owner_action_queue || []).some((a) => a.priority === "P1" || a.primary_action === "PAUSE");
-  const summary = `Business is ${profitable ? "profitable" : "not profitable"} and advertising is ${affordable ? "affordable" : "above its safe level"}, but Shopify acquisition is ${shopifyHealthy ? "contributing positively" : "weak"}${inventoryRisk ? " and excess inventory remains high" : ""}.${urgent ? " There are urgent actions to review today." : " No urgent account-wide change is needed today."}`;
-  const marketingActions = md.owner_action_queue || [];
-  const generalActions = ctx.report.recommendations || [];
-  const topActions = [
-    ...marketingActions.map((a) => ({ ...a, source: "Marketing" })),
-    ...generalActions.map((a) => ({
-      priority: a.priority === "critical" ? "P1" : a.priority === "high" ? "P2" : a.priority === "medium" ? "P3" : "P4",
-      primary_action: a.action,
-      entity_name: a.entity_name || a.area,
-      reason: a.reason,
-      confidence: a.confidence,
-      reason_codes: a.reason_code ? [a.reason_code] : [],
-      source: "Operations",
-    })),
-  ].sort((a, b) => String(a.priority || "P4").localeCompare(String(b.priority || "P4"))).slice(0, 5);
-  const actionRows = topActions.map((a) => `<tr>
+  const urgent = (exec.do_this_today || md.owner_action_queue || []).some(
+    (a) => a.priority === "P1" || a.primary_action === "PAUSE"
+  );
+
+  const statuses = exec.statuses || [];
+  const statusCards = statuses
+    .map(
+      (s) => `<div class="owner-status tone-${statusTone(s.status)}">
+      <div class="owner-status-area">${escapeHtml(s.area)}</div>
+      <div class="owner-status-val">${escapeHtml(s.status)}</div>
+      <div class="owner-status-why">${escapeHtml(s.why || "")}</div>
+    </div>`
+    )
+    .join("");
+
+  const actions = (exec.do_this_today || []).slice(0, 8);
+  const fallbackActions = !actions.length
+    ? (md.owner_action_queue || []).slice(0, 5).map((a) => ({
+        ...a,
+        area: "Marketing",
+        what_to_do: a.primary_action,
+        why: a.reason,
+      }))
+    : [];
+  const queue = actions.length ? actions : fallbackActions;
+  const actionRows = queue
+    .map(
+      (a) => `<tr>
     <td><span class="priority priority-${escapeHtml(a.priority || "P4")}">${escapeHtml(a.priority || "P4")}</span></td>
     <td><span class="action action-${actionTone(a.primary_action)}">${escapeHtml(actionLabel(a.primary_action))}</span></td>
-    <td>${escapeHtml(a.entity_name || "Business")}</td>
-    <td>${escapeHtml(friendlyReason(a))}</td>
-    <td>${escapeHtml(a.source || "Operations")}</td>
-  </tr>`).join("");
+    <td>${escapeHtml(a.area || "—")}</td>
+    <td>${escapeHtml(a.what_to_do || a.entity_name || "—")}</td>
+    <td>${escapeHtml(a.why || friendlyReason(a))}
+      ${
+        a.expandable_why
+          ? `<details class="why-expand"><summary>Why am I seeing this?</summary><p>${escapeHtml(a.expandable_why)}</p>
+             <p class="note">${sourceBadgeHtml(a.source || "CALCULATED")} Confidence: ${escapeHtml(a.confidence || "—")}</p></details>`
+          : ""
+      }
+    </td>
+    <td>${escapeHtml(String(a.confidence || "—").toUpperCase())}</td>
+  </tr>`
+    )
+    .join("");
+
+  const watchItems = (exec.watch_list || [])
+    .map((w) => `<li><strong>${escapeHtml(w.area)}</strong> — ${escapeHtml(w.text)}</li>`)
+    .join("");
+
+  const mtd = fc.month_to_date || exec.forecast_summary?.month_to_date || {};
+  const scen = (key) =>
+    fc.scenarios?.[key] || exec.forecast_summary?.[key.toLowerCase()] || null;
+  const conf = fc.confidence || exec.forecast_summary?.confidence || "—";
 
   return `<div id="view-overview" class="view active">
   ${
@@ -390,40 +434,81 @@ function renderOverview(ctx) {
       ? `<p class="note tone-warn">Today's Meta and order activity may still be incomplete.</p>`
       : ""
   }
-  <section class="hero-section">
-    <div class="eyebrow">What you need to know</div>
-    <h2>Business at a glance</h2>
-    <p class="executive-verdict">${escapeHtml(summary)}</p>
-    <div class="grid key-grid">
-      ${card("Net profit", money(p.meta_adjusted_profit, cur), "After actual Meta spend", profitable ? "ok" : "bad", TIPS.meta_adjusted_profit)}
-      ${card("Can we afford current ad spend?", affordable ? "Yes" : "No", `${pct(bas.business_cpa_headroom_pct)} headroom`, affordable ? "ok" : "bad", TIPS.affordability)}
-      ${card("Shopify contribution after Meta", money(sc.contribution_after_meta, cur), shopifyHealthy ? "Shopify is contributing" : "Shopify acquisition needs attention", shopifyHealthy ? "ok" : "warn", TIPS.shopify_contribution)}
-      ${card("Inventory capital at risk", money(inv.capital_at_risk_value, cur), inv.capital_at_risk_pct == null ? "Inventory data unavailable" : pct(inv.capital_at_risk_pct), inventoryRisk ? "warn" : "neutral")}
-      ${card("Urgent today", urgent ? "Yes" : "No", urgent ? "Review the first action below" : "No P1 actions", urgent ? "bad" : "ok")}
+  <section class="hero-section owner-brief">
+    <div class="eyebrow">Daily owner screen</div>
+    <h2>WEAR ACTIVE — OWNER BRIEF</h2>
+    <p class="period-line">Period ${escapeHtml(fresh.period?.since || ctx.report.date_range?.since || "—")} → ${escapeHtml(fresh.period?.until || ctx.report.date_range?.until || "—")} · Last refreshed ${escapeHtml(fresh.last_refreshed || ctx.report.generated_at || "—")}</p>
+    <div class="freshness-row">
+      <span class="badge">Books through ${escapeHtml(fresh.books_through || "—")}</span>
+      <span class="badge">Shopify through ${escapeHtml(fresh.shopify_through || "—")}</span>
+      <span class="badge">Meta through ${escapeHtml(fresh.meta_through || "—")}</span>
+      <span class="badge">Inventory through ${escapeHtml(fresh.inventory_through || "—")}</span>
+      ${fresh.attribution_capture_started ? `<span class="badge">Attribution capture ${escapeHtml(fresh.attribution_capture_started)}</span>` : `<span class="badge">Attribution: collecting</span>`}
     </div>
+    <div class="owner-status-grid">${statusCards || `<p class="empty-state">Run <code>npm run reports:owner</code> for full owner statuses.</p>`}</div>
   </section>
+
   <section>
-    <div class="eyebrow">What needs action</div>
-    <h2>Top 5 actions</h2>
-    <p class="note">The highest-priority operational, marketing, pricing, and inventory guidance available in this report.</p>
+    <div class="eyebrow">What should I do today?</div>
+    <h2>Do This Today</h2>
+    <p class="note">Ranked from existing marketing, inventory, pricing, and data-quality evidence. Advisory only — nothing is changed automatically.</p>
     <div class="table-wrap"><table class="action-table">
-      <thead><tr><th>Priority</th><th>Action</th><th>Item</th><th>Why</th><th>Area</th></tr></thead>
-      <tbody>${actionRows || `<tr><td colspan="5" class="empty-state">Nothing urgent needs action right now.</td></tr>`}</tbody>
+      <thead><tr><th>Priority</th><th>Action</th><th>Area</th><th>What to do</th><th>Why</th><th>Confidence</th></tr></thead>
+      <tbody>${actionRows || `<tr><td colspan="6" class="empty-state">Nothing urgent needs action right now.</td></tr>`}</tbody>
     </table></div>
   </section>
+
   <section>
-    <div class="eyebrow">Supporting detail</div>
-    <h2>Key supporting numbers</h2>
-    <div class="grid">
-      ${card("Net recognized revenue", money(books.net_revenue_ex_tax, cur))}
-      ${card("Gross margin", pct(books.gross_margin_pct), "Revenue left after product cost, before operating expenses.", "neutral", TIPS.gross_margin)}
-      ${card("Recognized orders", num(books.recognized_orders, 0))}
-      ${card("Meta spend", money(totals.spend, cur))}
-      ${card("Meta-reported cost per purchase", money(totals.cpa, cur), "Reported by Meta", "neutral", TIPS.meta_cpa)}
-      ${card("Maximum ad cost per sale", money(p.break_even_cpa, cur), "Before profit is exhausted", "neutral", TIPS.break_even_cpa)}
-    </div>
-    ${conc.non_shopify_distortion_risk ? `<p class="callout warning"><strong>Business Mix Context:</strong> ${escapeHtml(conc.warning || "Business profitability is mostly coming from non-Shopify sales.")}</p>` : ""}
+    <div class="eyebrow">What should I watch?</div>
+    <h2>Watch List</h2>
+    <p class="note">Important context that is not necessarily an urgent action today.</p>
+    <ul class="watch-list">${watchItems || `<li class="empty-state">No watch items.</li>`}</ul>
   </section>
+
+  <section>
+    <div class="eyebrow">Where are we heading?</div>
+    <h2>Month outlook ${sourceBadgeHtml("FORECAST")}</h2>
+    <p class="callout warning"><strong>FORECAST — NOT ACTUAL.</strong> Deterministic pace projections. Confidence: <strong>${escapeHtml(String(conf))}</strong>.</p>
+    ${
+      conf === "INSUFFICIENT"
+        ? `<p class="note tone-warn">Too little history to project month-end reliably — projections suppressed from decision-making.</p>`
+        : `<div class="grid key-grid">
+      ${card("ACTUAL MTD revenue", money(mtd.revenue, cur), `Orders ${num(mtd.orders, 0)} · Profit after Meta ${money(mtd.profit_after_meta, cur)}`, "neutral", TIPS.forecast, "BOOKS")}
+      ${card("FORECAST revenue (Base)", money(scen("BASE")?.projected_revenue, cur), scen("BASE")?.assumption || "Recent pace continues", "neutral", TIPS.forecast, "FORECAST")}
+      ${card("FORECAST pre-ad profit (Base)", money(scen("BASE")?.projected_profit_before_ads, cur), "Sales-pace estimate — not causal", "neutral", TIPS.forecast, "FORECAST")}
+      ${card("FORECAST Meta spend (Base)", money(scen("BASE")?.projected_meta_spend, cur), "Spend-pace estimate", "neutral", TIPS.forecast, "FORECAST")}
+      ${card("FORECAST profit after Meta (Base)", money(scen("BASE")?.projected_profit_after_meta, cur), "Pre-ad − Meta spend", "neutral", TIPS.forecast, "FORECAST")}
+    </div>
+    <div class="grid">
+      ${card("Conservative revenue", money(scen("CONSERVATIVE")?.projected_revenue, cur), `Profit after Meta ${money(scen("CONSERVATIVE")?.projected_profit_after_meta, cur)}`, "neutral", TIPS.forecast, "FORECAST")}
+      ${card("Upside revenue", money(scen("UPSIDE")?.projected_revenue, cur), `Profit after Meta ${money(scen("UPSIDE")?.projected_profit_after_meta, cur)}`, "neutral", TIPS.forecast, "FORECAST")}
+    </div>
+    <p class="note">Open the Forecast tab for full scenario table, spend what-ifs (no manufactured ROAS), and inventory cover.</p>`
+    }
+  </section>
+
+  <section>
+    <div class="eyebrow">How is the business doing?</div>
+    <h2>Key numbers</h2>
+    <div class="grid key-grid">
+      ${card("Profit after actual Meta spend", money(p.meta_adjusted_profit, cur), "Books ads replaced with Meta spend", profitable ? "ok" : "bad", TIPS.meta_adjusted_profit, "CALCULATED")}
+      ${card("Can we afford current ad spend?", affordable ? "Yes" : "No", `${pct(bas.business_cpa_headroom_pct)} headroom`, affordable ? "ok" : "bad", TIPS.affordability, "CALCULATED")}
+      ${card("Shopify contribution after Meta", money(sc.contribution_after_meta, cur), shopifyHealthy ? "Contributing" : "Needs attention", shopifyHealthy ? "ok" : "warn", TIPS.shopify_contribution, "CALCULATED")}
+      ${card("Inventory capital at risk", money(inv.capital_at_risk_value, cur), inv.capital_at_risk_pct == null ? "Unavailable" : pct(inv.capital_at_risk_pct), inventoryRisk ? "warn" : "neutral", TIPS.inventory_capital_at_risk, "CALCULATED")}
+      ${card("Urgent today?", urgent ? "Yes" : "No", urgent ? "Handle P1/P2 below" : "No P1 actions", urgent ? "bad" : "ok")}
+    </div>
+    <div class="grid">
+      ${card("Recognized net revenue", money(books.net_revenue_ex_tax, cur), "Ex-tax, after refunds", "neutral", tipText("net_revenue"), "BOOKS")}
+      ${card("Gross margin", pct(books.gross_margin_pct), "After product cost, before opex", "neutral", TIPS.gross_margin, "BOOKS")}
+      ${card("Recognized orders", num(books.recognized_orders, 0), "", "neutral", TIPS.recognized_order, "BOOKS")}
+      ${card("Meta advertising spend", money(totals.spend, cur), "", "neutral", tipText("meta_spend"), "META")}
+      ${card("Meta cost per purchase (CPA)", money(totals.cpa, cur), "Platform only — not affordability", "neutral", TIPS.meta_cpa, "META")}
+      ${card("Break-even ad cost per sale", money(p.break_even_cpa, cur), "Business safety threshold", "neutral", TIPS.break_even_cpa, "CALCULATED")}
+    </div>
+    <p class="note">Do <strong>not</strong> compare Meta CPA to break-even ad cost for affordability. Affordability uses Meta spend ÷ Books recognized orders vs break-even.</p>
+    ${conc.non_shopify_distortion_risk ? `<p class="callout warning"><strong>Business Mix Context:</strong> ${escapeHtml(conc.warning || "Profitability is mostly from non-Shopify sales.")}</p>` : ""}
+  </section>
+
   <details class="secondary-section">
     <summary>Business, Shopify, and sales mix context</summary>
     <section>
@@ -437,10 +522,10 @@ function renderOverview(ctx) {
       <h2>Contribution after Meta</h2>
       <p><span class="pill tone-${statusClass(sc.contribution_status)}">${escapeHtml(prettyStatus(sc.contribution_status))}</span></p>
       <div class="grid">
-        ${card("Shopify net revenue", money(sc.net_revenue_ex_tax, cur))}
-        ${card("Shopify refunds", money(sc.refunds, cur))}
-        ${card("Shopify COGS", money(sc.cogs, cur))}
-        ${card("Shopify ad load", money(sc.ad_load_per_recognized_order ?? sc.shopify_ad_load_per_recognized_order, cur), "DATE-ALIGNED · NOT ATTRIBUTED", "neutral", TIPS.shopify_ad_load)}
+        ${card("Shopify net revenue", money(sc.net_revenue_ex_tax, cur), "", "neutral", null, "BOOKS")}
+        ${card("Shopify refunds", money(sc.refunds, cur), "", "neutral", null, "BOOKS")}
+        ${card("Shopify COGS", money(sc.cogs, cur), "", "neutral", TIPS.cogs, "BOOKS")}
+        ${card("Shopify ad load", money(sc.ad_load_per_recognized_order ?? sc.shopify_ad_load_per_recognized_order, cur), "DATE-ALIGNED · NOT ATTRIBUTED", "neutral", TIPS.shopify_ad_load, "CALCULATED")}
       </div>
     </section>
     <section>
@@ -457,7 +542,7 @@ function renderOverview(ctx) {
   <section class="quality-section">
     <div class="eyebrow">Data quality and caveats</div>
     ${dataQualityLine(ctx.report.data_quality)}
-    <p class="note">Detailed diagnostics are available in the Data Quality tab.</p>
+    <p class="note">Detailed diagnostics are in the Data Quality tab.</p>
   </section>
 </div>`;
 }
@@ -1805,6 +1890,207 @@ function renderMarketingDecisions(ctx) {
 </div>`;
 }
 
+function renderForecast(ctx) {
+  const { cur } = ctx;
+  const fc = ctx.report.forecast || {};
+  const invf = ctx.report.inventory_forecast || {};
+  if (!fc.scenarios && !fc.month_to_date) {
+    return `<div id="view-forecast" class="view">
+  <section class="hero-section">
+    <div class="eyebrow">Planning</div>
+    <h2>Forecast</h2>
+    <p class="empty-state">No forecast attached. Run <code>npm run reports:owner</code>.</p>
+  </section>
+</div>`;
+  }
+  const mtd = fc.month_to_date || {};
+  const base = fc.scenarios?.BASE || {};
+  const scenRows = ["CONSERVATIVE", "BASE", "UPSIDE"]
+    .map((k) => {
+      const s = fc.scenarios?.[k];
+      if (!s) return "";
+      return `<tr>
+        <td>${escapeHtml(k)}</td>
+        <td>${escapeHtml(s.assumption || "")}</td>
+        <td>${money(s.projected_revenue, cur)}</td>
+        <td>${num(s.projected_orders, 0)}</td>
+        <td>${money(s.projected_gross_profit, cur)}</td>
+        <td>${money(s.projected_profit_before_ads, cur)}</td>
+        <td>${money(s.projected_meta_spend, cur)}</td>
+        <td>${money(s.projected_profit_after_meta, cur)}</td>
+      </tr>`;
+    })
+    .join("");
+  const spendRows = (fc.spend_scenarios || [])
+    .map(
+      (s) => `<tr>
+      <td>${escapeHtml(s.label)}</td>
+      <td>${money(s.projected_meta_spend, cur)}</td>
+      <td>${money(s.projected_profit_before_ads, cur)}</td>
+      <td>${money(s.projected_profit_after_meta, cur)}</td>
+      <td>${escapeHtml(s.known)}</td>
+      <td class="tone-warn">${escapeHtml(s.unknown)}</td>
+    </tr>`
+    )
+    .join("");
+  const coverRows = (invf.cover_where_evidence || [])
+    .slice(0, 15)
+    .map(
+      (s) => `<tr>
+      <td>${escapeHtml(s.product || "")}</td>
+      <td>${escapeHtml(s.sku || "")}</td>
+      <td>${escapeHtml(String(s.stock_class || ""))}</td>
+      <td>${num(s.days_of_cover, 0)}</td>
+      <td>${num(s.current_stock, 0)}</td>
+    </tr>`
+    )
+    .join("");
+  const stockoutRows = (invf.stockout_risks || [])
+    .slice(0, 12)
+    .map(
+      (s) => `<tr>
+      <td>${escapeHtml(s.product || "")}</td>
+      <td>${escapeHtml(s.sku || "")}</td>
+      <td>${escapeHtml(String(s.stock_class || ""))}</td>
+      <td>${num(s.days_of_cover, 0)}</td>
+      <td>${num(s.units_sold_30d, 0)}</td>
+      <td>${escapeHtml(s.note || "")}</td>
+    </tr>`
+    )
+    .join("");
+
+  const planningCards = [];
+  if (fc.planning?.target_gross_profit != null) {
+    planningCards.push(
+      card(
+        "Target gross profit",
+        money(fc.planning.target_gross_profit, cur),
+        "Gross profit only — not net after ads",
+        "neutral",
+        null,
+        "CALCULATED"
+      )
+    );
+    planningCards.push(
+      card(
+        "Revenue required for target gross profit",
+        money(fc.planning.revenue_required_for_target_gross_profit, cur),
+        "Uses observed gross margin only",
+        "neutral",
+        null,
+        "FORECAST"
+      )
+    );
+  }
+  if (fc.planning?.target_profit_after_meta != null) {
+    planningCards.push(
+      card(
+        "Target profit after Meta (requested)",
+        money(fc.planning.target_profit_after_meta, cur),
+        fc.planning.target_profit_revenue_suppressed
+          ? "Revenue path suppressed — insufficient defensible inputs"
+          : "",
+        "warn",
+        null,
+        "CALCULATED"
+      )
+    );
+  }
+  if (fc.planning?.orders_required_at_current_aov != null) {
+    planningCards.push(
+      card(
+        "Orders at current AOV (gross-profit target)",
+        num(fc.planning.orders_required_at_current_aov, 0),
+        "",
+        "neutral",
+        TIPS.aov
+      )
+    );
+  }
+  if (fc.planning?.max_affordable_meta_spend_mtd_buffer != null) {
+    planningCards.push(
+      card(
+        "Max affordable Meta (MTD pre-ad buffer)",
+        money(fc.planning.max_affordable_meta_spend_mtd_buffer, cur)
+      )
+    );
+  }
+
+  return `<div id="view-forecast" class="view">
+  <section class="hero-section">
+    <div class="eyebrow">Planning · scenarios</div>
+    <h2>Forecast ${sourceBadgeHtml("FORECAST")}</h2>
+    <p class="callout warning"><strong>FORECAST — NOT ACTUAL.</strong> Deterministic pace projections only. Never written into Books, Ledger, Shopify, or Meta.</p>
+    <p class="confidence-banner">Confidence: <strong>${escapeHtml(String(fc.confidence || "—"))}</strong> — ${escapeHtml(fc.confidence_note || "")}</p>
+    <p class="note">${escapeHtml(fc.mtd_source_note || "")}</p>
+    <h3>ACTUAL MTD</h3>
+    <div class="grid key-grid">
+      ${card("ACTUAL MTD revenue", money(mtd.revenue, cur), mtd.label || "ACTUAL", "neutral", tipText("net_revenue"), "BOOKS")}
+      ${card("ACTUAL MTD orders", num(mtd.orders, 0), "", "neutral", TIPS.recognized_order, "BOOKS")}
+      ${card("ACTUAL MTD gross profit", money(mtd.gross_profit, cur), "", "neutral", tipText("gross_profit"), "BOOKS")}
+      ${card("ACTUAL MTD pre-ad profit", money(mtd.profit_before_ads, cur), "", "neutral", null, "CALCULATED")}
+      ${card("ACTUAL MTD Meta spend", money(mtd.meta_spend, cur), "", "neutral", tipText("meta_spend"), "META")}
+      ${card("ACTUAL MTD profit after Meta", money(mtd.profit_after_meta, cur), "", "neutral", TIPS.meta_adjusted_profit, "CALCULATED")}
+    </div>
+    <h3>BASE month-end forecast ${sourceBadgeHtml("FORECAST")}</h3>
+    <div class="grid key-grid">
+      ${card("FORECAST revenue", money(base.projected_revenue, cur), "Base scenario", "neutral", TIPS.forecast, "FORECAST")}
+      ${card("FORECAST pre-ad profit", money(base.projected_profit_before_ads, cur), "Sales-pace estimate — not causal", "neutral", TIPS.forecast, "FORECAST")}
+      ${card("FORECAST Meta spend", money(base.projected_meta_spend, cur), "Spend-pace estimate", "neutral", TIPS.forecast, "FORECAST")}
+      ${card("FORECAST profit after Meta", money(base.projected_profit_after_meta, cur), "Pre-ad profit − Meta spend", "neutral", TIPS.forecast, "FORECAST")}
+      ${card("Days left in month", num(fc.calendar_month?.days_remaining, 0), `${escapeHtml(fc.calendar_month?.since || "")} → ${escapeHtml(fc.calendar_month?.until || "")}`)}
+    </div>
+  </section>
+  <section>
+    <h2>Month-end scenarios</h2>
+    <p class="note">Profit after Meta = projected pre-ad profit − projected Meta spend. Pre-ad profit follows the <strong>sales</strong> factor; Meta spend follows the <strong>spend</strong> factor. No causal revenue from higher spend.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Scenario</th><th>Assumption</th><th>FORECAST revenue</th><th>Orders</th><th>Gross profit</th><th>FORECAST pre-ad profit</th><th>FORECAST Meta spend</th><th>FORECAST profit after Meta</th></tr></thead>
+      <tbody>${scenRows || `<tr><td colspan="8" class="empty-state">No scenarios.</td></tr>`}</tbody>
+    </table></div>
+  </section>
+  <section>
+    <h2>Meta spend what-ifs</h2>
+    <p class="note">Changing spend is <strong>known</strong>. Incremental revenue is <strong>unknown</strong> — pre-ad profit is held at base pace (no causal ROAS).</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Scenario</th><th>FORECAST Meta spend</th><th>FORECAST pre-ad profit (held)</th><th>FORECAST profit after Meta</th><th>Known</th><th>Unknown</th></tr></thead>
+      <tbody>${spendRows || `<tr><td colspan="6" class="empty-state">No spend scenarios.</td></tr>`}</tbody>
+    </table></div>
+  </section>
+  ${
+    fc.planning
+      ? `<section>
+    <h2>Target planning</h2>
+    <div class="grid">${planningCards.join("") || `<p class="empty-state">No planning targets set.</p>`}</div>
+    ${
+      fc.planning.target_profit_revenue_suppressed
+        ? `<p class="callout warning"><strong>Net target revenue suppressed.</strong> ${escapeHtml(fc.planning.target_profit_suppression_reason || "")}</p>`
+        : ""
+    }
+    <p class="note">${escapeHtml(fc.planning.note || "")}</p>
+  </section>`
+      : ""
+  }
+  <section>
+    <h2>Inventory outlook</h2>
+    <p class="note">${escapeHtml(invf.note || "Stock depletion is not forecast from zero demand evidence.")}</p>
+    <div class="grid">
+      ${card("Capital likely tied up (observed)", money(invf.capital_at_risk, cur), invf.capital_at_risk_pct == null ? "" : pct(invf.capital_at_risk_pct), "warn", TIPS.inventory_capital_at_risk, "CALCULATED")}
+    </div>
+    <h3>Stock cover (where demand evidence exists)</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Product</th><th>SKU</th><th>Class</th><th>Days of cover</th><th>Stock</th></tr></thead>
+      <tbody>${coverRows || `<tr><td colspan="5" class="empty-state">Insufficient demand evidence for cover samples.</td></tr>`}</tbody>
+    </table></div>
+    <h3>Stockout / low cover risks</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Product</th><th>SKU</th><th>Class</th><th>Cover</th><th>30d units</th><th>Note</th></tr></thead>
+      <tbody>${stockoutRows || `<tr><td colspan="6" class="empty-state">No evidenced stockout risks.</td></tr>`}</tbody>
+    </table></div>
+  </section>
+</div>`;
+}
+
 const STYLES = `
 :root {
   --bg: #f5f4f0;
@@ -1941,6 +2227,74 @@ header.hero h1 {
   font-size: 11px;
   font-weight: 600;
   color: var(--muted);
+}
+.src-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  vertical-align: middle;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: #f3f5f3;
+}
+.src-meta { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; }
+.src-shopify { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+.src-books { background: #fff7ed; color: #9a3412; border-color: #fed7aa; }
+.src-first-party { background: #f5f3ff; color: #5b21b6; border-color: #ddd6fe; }
+.src-calculated { background: #f0fdfa; color: #0f766e; border-color: #99f6e4; }
+.src-forecast { background: #fefce8; color: #854d0e; border-color: #fde68a; }
+.owner-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+.owner-status {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--surface-raised);
+}
+.owner-status-area {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  color: var(--faint);
+}
+.owner-status-val {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: -.01em;
+}
+.owner-status-why {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.35;
+}
+.owner-status.tone-ok { border-color: #bbf7d0; background: var(--ok-bg); }
+.owner-status.tone-warn { border-color: #fde68a; background: var(--warn-bg); }
+.owner-status.tone-bad { border-color: #fecaca; background: var(--bad-bg); }
+.watch-list { margin: 0; padding-left: 18px; }
+.watch-list li { margin-bottom: 8px; color: var(--ink); }
+.why-expand { margin-top: 6px; font-size: 12px; color: var(--muted); }
+.why-expand summary { cursor: pointer; color: var(--accent-dark); font-weight: 600; }
+.freshness-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.period-line { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
+.confidence-banner {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--warn-bg);
+  border: 1px solid #fde68a;
+  font-size: 14px;
+  color: var(--ink);
 }
 .btn-print {
   margin-left: auto;
@@ -2376,18 +2730,19 @@ function renderUnifiedDashboard(report) {
 
   const navItems = [
     ["overview", "Overview"],
+    ["marketing", "Marketing"],
     ["profitability", "Profitability"],
     ["sales", "Sales"],
-    ["products", "Products"],
     ["inventory", "Inventory"],
-    ["customers", "Customers"],
     ["pricing", "Pricing"],
-    ["marketing", "Marketing Decisions"],
-    ["advertising", "Advertising"],
-    ["decisions", "Decisions"],
-    ["data-quality", "Data Quality"],
+    ["customers", "Customers"],
     ["attribution", "Attribution"],
     ["attr-economics", "Attr. Economics"],
+    ["advertising", "Advertising"],
+    ["forecast", "Forecast"],
+    ["products", "Products"],
+    ["decisions", "Decisions"],
+    ["data-quality", "Data Quality"],
   ];
 
   const navHtml = navItems
@@ -2414,33 +2769,35 @@ function renderUnifiedDashboard(report) {
   <main class="main">
     <header class="hero">
       <div class="brand">WEAR ACTIVE</div>
-      <h1>Reporting &amp; Decision Intelligence</h1>
+      <h1>Owner Operating Dashboard</h1>
       <div class="period">${escapeHtml(dr.since)} → ${escapeHtml(dr.until)}</div>
       <div class="badge-row">
         <span class="badge">${escapeHtml(dr.timezone || "Asia/Karachi")}</span>
         <span class="badge">Generated ${escapeHtml(report.generated_at || "")}</span>
         <span class="badge">${isFull ? "Full calendar month" : "Partial period"}</span>
         <span class="badge">READ ONLY</span>
+        <span class="badge">FORECAST ≠ ACTUAL</span>
         <button type="button" class="btn-print" id="print-btn">Print / Save PDF</button>
       </div>
     </header>
 
     ${renderOverview(ctx)}
+    ${renderMarketingDecisions(ctx)}
     ${renderProfitability(ctx)}
     ${renderSales(ctx)}
-    ${renderProducts(ctx)}
     ${renderInventory(ctx)}
-    ${renderCustomers(ctx)}
     ${renderPricing(ctx)}
-    ${renderMarketingDecisions(ctx)}
-    ${renderAdvertising(ctx)}
-    ${renderDecisions(ctx)}
-    ${renderDataQuality(ctx)}
+    ${renderCustomers(ctx)}
     ${renderAttribution(ctx)}
     ${renderAttributionEconomics(ctx)}
+    ${renderAdvertising(ctx)}
+    ${renderForecast(ctx)}
+    ${renderProducts(ctx)}
+    ${renderDecisions(ctx)}
+    ${renderDataQuality(ctx)}
 
     <footer>
-      Wear Active Reporting &amp; Decision Intelligence · Advisory only · No Meta mutations · No Sheet writes
+      Wear Active Owner Operating Dashboard · Advisory only · Forecasts are not Books facts · No Meta mutations · No Sheet writes
     </footer>
   </main>
 </div>
