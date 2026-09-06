@@ -122,7 +122,8 @@ Local-only under the editor (gitignored): `input/`, `photos/`, `gpt_output/`,
 | `reports:backfill` | Backfill daily snapshots for a date range (no delivery by default) |
 | `operations:test` | Phase 4 snapshot/history/trends/alerts/delivery self-tests |
 | `attribution:report` | Phase 5A first-party attribution diagnostics (read-only) |
-| `attribution:test` | Attribution normalize / coverage / sheet-mapping self-tests |
+| `attribution:economics` | Phase 5B first-party attributed economics by campaign/adset/ad (read-only) |
+| `attribution:test` | Attribution normalize / coverage / economics self-tests |
 | `decisions:dashboard` | Legacy path (same renderer → `reports/decisions/`) |
 | `dashboard:test` | Sales-mix + dashboard pure-function tests |
 | `profitability:test` | Pure-function tests for no-double-count / reconcile |

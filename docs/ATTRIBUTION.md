@@ -153,6 +153,39 @@ Buy Now / Shop Pay / dynamic checkout buttons may bypass cart attributes on
 Shopify Basic. Documented coverage gap — do not disable accelerated checkout
 solely for attribution without explicit approval.
 
+## Phase 5B — attributed economics
+
+```bash
+npm run attribution:economics -- --days=7
+npm run attribution:economics -- --since=2026-08-01 --until=2026-09-06 --json
+```
+
+Connects first-party Meta IDs on **recognized Ledger ∩ post_capture** Shopify
+orders to entity spend.
+
+Pre-capture / historical journey evidence remains diagnostic (Phase 5A) and is
+**excluded** from attributed revenue, COGS, entity economics, coverage, and
+confidence sample size.
+
+Coverage:
+
+`post_capture_attributed_orders / post_capture_recognized_orders`
+
+(null when post-capture recognized = 0).
+
+`first_party_attributed_contribution` = observed attributed GP − period Meta spend
+(coverage-sensitive; not true business contribution while coverage is low).
+
+Keeps separate:
+
+1. Meta-reported platform metrics  
+2. First-party observed Shopify attribution (this report)  
+3. Unattributed recognized Shopify orders (not allocated)
+
+Dashboard: **Attr. Economics** — labeled **FIRST-PARTY ATTRIBUTED ECONOMICS — EXPERIMENTAL**.
+
+Does **not** change decision classifiers, Books posting, or Meta mutations.
+
 ## CLI
 
 ```bash
