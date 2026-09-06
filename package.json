@@ -71,7 +71,9 @@
     "inventory:report": "node src/scripts/inventory-report.js",
     "inventory:test": "node src/scripts/inventory-self-test.js",
     "customers:report": "node src/scripts/customers-report.js",
-    "customers:test": "node src/scripts/customers-self-test.js"
+    "customers:test": "node src/scripts/customers-self-test.js",
+    "pricing:report": "node src/scripts/pricing-report.js",
+    "pricing:test": "node src/scripts/pricing-self-test.js"
   },
   "keywords": [
     "shopify",
