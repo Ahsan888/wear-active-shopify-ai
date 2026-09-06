@@ -193,6 +193,39 @@ async function main() {
     };
   }
 
+  // Phase 8 — pricing & promotion intelligence (advisory only)
+  try {
+    const { fetchVariantPrices } = require("../pricing/fetchPrices");
+    const { buildPricingReport } = require("../pricing/build");
+    const { resolvePricingThresholds } = require("../pricing/thresholds");
+    const { loadVariantMaster } = require("../profitability/books");
+
+    const vm =
+      bundle._pricing_vm ||
+      (await loadVariantMaster());
+    const shopifyPrices = await fetchVariantPrices();
+    const inventorySkus = bundle.inventory?.skus || [];
+    bundle.pricing = buildPricingReport({
+      inventorySkus,
+      shopifyPrices,
+      catalogBySku: vm.bySku,
+      thresholds: resolvePricingThresholds(),
+      period: dateRange,
+      customerDiagnostics: bundle.customers?.summary
+        ? {
+            repeat_customer_rate_pct:
+              bundle.customers.summary.repeat_customer_rate_pct,
+            new_vs_returning: bundle.customers.new_vs_returning,
+          }
+        : null,
+    });
+  } catch (err) {
+    bundle.pricing = {
+      error: String(err.message || err),
+      advisory_only: true,
+    };
+  }
+
   const html = renderUnifiedDashboard(bundle);
 
   const outDir = path.join(process.cwd(), "reports", "dashboard");
