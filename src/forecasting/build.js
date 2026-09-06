@@ -67,13 +67,95 @@ function assessForecastConfidence({
 }
 
 /**
+ * Reconciled: projected_profit_after_meta = projected_profit_before_ads − projected_meta_spend.
+ * Pre-ad profit uses the sales scenario factor (pace estimate — not causal).
+ * Meta spend uses the spend scenario factor. No causal revenue from spend.
+ */
+function reconcileScenarioProfit(projected_profit_before_ads, projected_meta_spend) {
+  if (projected_profit_before_ads == null || projected_meta_spend == null) {
+    return null;
+  }
+  return round2(
+    Number(projected_profit_before_ads) - Number(projected_meta_spend)
+  );
+}
+
+/**
+ * Target planning — conservative.
+ * Gross-profit revenue needs only observed GM.
+ * Net / after-ads target revenue is suppressed (would invent opex + ad response).
+ */
+function buildTargetPlanning({
+  target_profit,
+  target_gross_profit,
+  mtd = {},
+  aov = null,
+} = {}) {
+  const gpMargin = safeDiv(mtd.gross_profit, mtd.revenue);
+  const max_affordable_meta =
+    mtd.profit_before_ads != null
+      ? round2(Number(mtd.profit_before_ads))
+      : null;
+
+  const planning = {
+    max_affordable_meta_spend_mtd_buffer: max_affordable_meta,
+    revenue_required_for_target_profit: null,
+    target_profit_revenue_suppressed: false,
+    target_profit_suppression_reason: null,
+    target_gross_profit: null,
+    revenue_required_for_target_gross_profit: null,
+    orders_required_at_current_aov: null,
+    note: null,
+  };
+
+  const tgp =
+    target_gross_profit != null && Number.isFinite(Number(target_gross_profit))
+      ? Number(target_gross_profit)
+      : null;
+
+  if (tgp != null) {
+    planning.target_gross_profit = tgp;
+    if (gpMargin != null && gpMargin > 0) {
+      const revenue_needed = round2(tgp / gpMargin);
+      planning.revenue_required_for_target_gross_profit = revenue_needed;
+      planning.orders_required_at_current_aov =
+        aov != null && aov > 0 ? round2(revenue_needed / aov) : null;
+      planning.note =
+        "Revenue required for target gross profit uses observed gross margin only. Not net profit after ads/opex.";
+    } else {
+      planning.note =
+        "Cannot estimate revenue for target gross profit — gross margin unavailable.";
+    }
+  }
+
+  if (target_profit != null && Number.isFinite(Number(target_profit))) {
+    planning.target_profit_after_meta = Number(target_profit);
+    planning.revenue_required_for_target_profit = null;
+    planning.target_profit_revenue_suppressed = true;
+    planning.target_profit_suppression_reason =
+      "Revenue required for net/after-ads target profit is suppressed — would invent fixed opex and causal Meta spend→revenue assumptions. Use target_gross_profit for a gross-profit revenue estimate, or compare scenario projected_profit_before_ads − projected_meta_spend.";
+    if (!planning.note) {
+      planning.note = planning.target_profit_suppression_reason;
+    }
+  }
+
+  const hasAny =
+    tgp != null ||
+    (target_profit != null && Number.isFinite(Number(target_profit))) ||
+    max_affordable_meta != null;
+  return hasAny ? planning : null;
+}
+
+/**
  * Build month forecast from MTD actuals + observed pace.
  *
  * @param {object} input
- * @param {object} input.mtd - { revenue, orders, gross_profit, meta_adjusted_profit, meta_spend, aov }
- * @param {object} input.pace_period - trailing window used for pace { revenue, orders, gross_profit, meta_spend, days }
+ * @param {object} input.mtd - { revenue, orders, gross_profit, meta_adjusted_profit, meta_spend, aov, profit_before_ads }
+ * @param {object} input.pace_period - trailing window for pace (include profit_before_ads)
  * @param {string} input.as_of - YYYY-MM-DD
  * @param {object} [input.flags]
+ * @param {number} [input.target_profit] - net/after-ads; revenue path suppressed
+ * @param {number} [input.target_gross_profit] - gross profit; revenue = target / GM
  */
 function buildMonthForecast(input = {}) {
   const asOf = assertYmd(input.as_of || todayYmd());
@@ -90,7 +172,7 @@ function buildMonthForecast(input = {}) {
     orders: pace(paceSrc.orders, paceDays),
     gross_profit: pace(paceSrc.gross_profit, paceDays),
     meta_spend: pace(paceSrc.meta_spend, paceDays),
-    meta_adjusted_profit: pace(paceSrc.meta_adjusted_profit, paceDays),
+    profit_before_ads: pace(paceSrc.profit_before_ads, paceDays),
   };
 
   const aov =
@@ -136,12 +218,14 @@ function buildMonthForecast(input = {}) {
       remaining,
       fac.spend
     );
-    const profit = projectRemaining(
-      mtd.meta_adjusted_profit,
-      daily.meta_adjusted_profit,
+    // Pre-ad profit: sales-factor pace estimate (NOT causal from Meta spend)
+    const pba = projectRemaining(
+      mtd.profit_before_ads,
+      daily.profit_before_ads,
       remaining,
       fac.sales
     );
+    const profit_after = reconcileScenarioProfit(pba, spend);
 
     scenarios[key] = {
       key,
@@ -149,49 +233,41 @@ function buildMonthForecast(input = {}) {
       projected_revenue: rev,
       projected_orders: orders == null ? null : round2(orders),
       projected_gross_profit: gp,
+      projected_profit_before_ads: pba,
       projected_meta_spend: spend,
-      projected_profit_after_meta: profit,
-      note: `${fac.label}. Deterministic pace projection — not a guarantee.`,
+      projected_profit_after_meta: profit_after,
+      note:
+        `${fac.label}. Deterministic pace projection — not a guarantee. ` +
+        `Projected pre-ad profit is a sales-pace estimate, not a causal/statistical forecast. ` +
+        `Profit after Meta = projected pre-ad profit − projected Meta spend.`,
     };
   }
 
   // Spend what-if: KNOWN spend change only; revenue UNKNOWN
   const baseSpend = scenarios.BASE.projected_meta_spend;
-  const spend_scenarios = [-0.2, -0.1, 0.1, 0.2].map((delta) => ({
-    label: `${delta > 0 ? "+" : ""}${Math.round(delta * 100)}% Meta spend`,
-    delta_pct: delta * 100,
-    projected_meta_spend:
-      baseSpend == null ? null : round2(baseSpend * (1 + delta)),
-    known: "additional or reduced Meta spend amount",
-    unknown:
-      "Incremental revenue/purchases are NOT projected — no causal ROAS assumed.",
-  }));
-
-  const target_profit = input.target_profit;
-  let planning = null;
-  if (target_profit != null && Number.isFinite(Number(target_profit))) {
-    const gpMargin = safeDiv(mtd.gross_profit, mtd.revenue);
-    const revenue_needed =
-      gpMargin != null && gpMargin > 0
-        ? round2(Number(target_profit) / gpMargin)
-        : null;
-    const orders_needed =
-      revenue_needed != null && aov != null && aov > 0
-        ? round2(revenue_needed / aov)
-        : null;
-    const max_affordable_meta =
-      mtd.profit_before_ads != null
-        ? round2(Number(mtd.profit_before_ads))
-        : null;
-    planning = {
-      target_profit: Number(target_profit),
-      revenue_required_rough: revenue_needed,
-      orders_required_at_current_aov: orders_needed,
-      max_affordable_meta_spend_mtd_buffer: max_affordable_meta,
-      note:
-        "Rough planning only. Revenue-for-profit uses current gross-margin pace; not a guarantee.",
+  const basePba = scenarios.BASE.projected_profit_before_ads;
+  const spend_scenarios = [-0.2, -0.1, 0.1, 0.2].map((delta) => {
+    const projected_meta_spend =
+      baseSpend == null ? null : round2(baseSpend * (1 + delta));
+    return {
+      label: `${delta > 0 ? "+" : ""}${Math.round(delta * 100)}% Meta spend`,
+      delta_pct: delta * 100,
+      projected_meta_spend,
+      // Hold base pre-ad profit — do NOT invent revenue from spend change
+      projected_profit_before_ads: basePba,
+      projected_profit_after_meta: reconcileScenarioProfit(basePba, projected_meta_spend),
+      known: "additional or reduced Meta spend amount",
+      unknown:
+        "Incremental revenue/purchases are NOT projected — no causal ROAS assumed. Pre-ad profit held at base pace.",
     };
-  }
+  });
+
+  const planning = buildTargetPlanning({
+    target_profit: input.target_profit,
+    target_gross_profit: input.target_gross_profit,
+    mtd,
+    aov,
+  });
 
   return {
     generated_at: new Date().toISOString(),
@@ -231,6 +307,8 @@ function buildMonthForecast(input = {}) {
     planning,
     assumptions: [
       "Sales and spend pace from recent observations broadly continue unless scenario factor adjusts them.",
+      "Projected pre-ad profit is a deterministic sales-pace estimate — not causal or statistical.",
+      "Projected profit after Meta = projected pre-ad profit − projected Meta spend (reconciled per scenario).",
       "No causal claim that higher Meta spend produces proportional revenue.",
       "FORECAST values are not Books/Ledger/Shopify/Meta facts.",
     ],
@@ -303,6 +381,8 @@ module.exports = {
   pace,
   projectRemaining,
   assessForecastConfidence,
+  reconcileScenarioProfit,
+  buildTargetPlanning,
   buildMonthForecast,
   buildInventoryForecast,
 };

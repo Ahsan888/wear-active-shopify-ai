@@ -84,6 +84,7 @@ function attachForecastAndExecutive(bundle, options = {}) {
       volatile: Boolean(options.volatile),
     },
     target_profit: options.target_profit,
+    target_gross_profit: options.target_gross_profit,
   });
   forecast.mtd_source_note = mtdNote;
   forecast.forecast_not_actual = true;

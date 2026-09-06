@@ -36,6 +36,15 @@ These are **wording / UX** only unless noted:
 | Forecast tab + FORECAST badge | Separate projections from actuals |
 | Source badges on key cards | Reduce Meta/Books conflation |
 
+## Forecast math hardening (follow-up)
+
+| Change | Behavior |
+|--------|----------|
+| Scenario profit | `projected_profit_after_meta = projected_profit_before_ads − projected_meta_spend` |
+| Pre-ad profit | Sales-factor pace estimate — **not** causal from Meta spend |
+| Target net profit revenue | **Suppressed** (insufficient without inventing opex/ad response) |
+| Target gross profit revenue | Allowed: `target_gross_profit ÷ observed GM` with correct label |
+
 ## Suspected data issues (report only — not silently “fixed”)
 
 - First-party attribution may still be **immature** — Meta numbers are not independently verified.

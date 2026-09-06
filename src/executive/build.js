@@ -361,7 +361,7 @@ function printOwnerBrief(exec) {
       const s = f[key];
       if (!s) continue;
       console.log(
-        `  ${key}: rev ${s.projected_revenue ?? "—"} · orders ${s.projected_orders ?? "—"} · profit ${s.projected_profit_after_meta ?? "—"}`
+        `  ${key}: rev ${s.projected_revenue ?? "—"} · pre-ad ${s.projected_profit_before_ads ?? "—"} · Meta ${s.projected_meta_spend ?? "—"} · after Meta ${s.projected_profit_after_meta ?? "—"}`
       );
     }
     console.log("");

@@ -473,12 +473,17 @@ function renderOverview(ctx) {
       conf === "INSUFFICIENT"
         ? `<p class="note tone-warn">Too little history to project month-end reliably — projections suppressed from decision-making.</p>`
         : `<div class="grid key-grid">
-      ${card("Current month actual (MTD)", money(mtd.revenue, cur), `Orders ${num(mtd.orders, 0)} · Profit after Meta ${money(mtd.profit_after_meta, cur)}`, "neutral", TIPS.forecast, "BOOKS")}
-      ${card("Conservative month-end", money(scen("CONSERVATIVE")?.projected_revenue, cur), scen("CONSERVATIVE")?.assumption || "Weaker sales", "neutral", TIPS.forecast, "FORECAST")}
-      ${card("Base month-end", money(scen("BASE")?.projected_revenue, cur), scen("BASE")?.assumption || "Recent pace continues", "neutral", TIPS.forecast, "FORECAST")}
-      ${card("Upside month-end", money(scen("UPSIDE")?.projected_revenue, cur), scen("UPSIDE")?.assumption || "Stronger sales", "neutral", TIPS.forecast, "FORECAST")}
+      ${card("ACTUAL MTD revenue", money(mtd.revenue, cur), `Orders ${num(mtd.orders, 0)} · Profit after Meta ${money(mtd.profit_after_meta, cur)}`, "neutral", TIPS.forecast, "BOOKS")}
+      ${card("FORECAST revenue (Base)", money(scen("BASE")?.projected_revenue, cur), scen("BASE")?.assumption || "Recent pace continues", "neutral", TIPS.forecast, "FORECAST")}
+      ${card("FORECAST pre-ad profit (Base)", money(scen("BASE")?.projected_profit_before_ads, cur), "Sales-pace estimate — not causal", "neutral", TIPS.forecast, "FORECAST")}
+      ${card("FORECAST Meta spend (Base)", money(scen("BASE")?.projected_meta_spend, cur), "Spend-pace estimate", "neutral", TIPS.forecast, "FORECAST")}
+      ${card("FORECAST profit after Meta (Base)", money(scen("BASE")?.projected_profit_after_meta, cur), "Pre-ad − Meta spend", "neutral", TIPS.forecast, "FORECAST")}
     </div>
-    <p class="note">Open the Forecast tab for spend what-ifs (known spend change only — no manufactured ROAS) and inventory cover.</p>`
+    <div class="grid">
+      ${card("Conservative revenue", money(scen("CONSERVATIVE")?.projected_revenue, cur), `Profit after Meta ${money(scen("CONSERVATIVE")?.projected_profit_after_meta, cur)}`, "neutral", TIPS.forecast, "FORECAST")}
+      ${card("Upside revenue", money(scen("UPSIDE")?.projected_revenue, cur), `Profit after Meta ${money(scen("UPSIDE")?.projected_profit_after_meta, cur)}`, "neutral", TIPS.forecast, "FORECAST")}
+    </div>
+    <p class="note">Open the Forecast tab for full scenario table, spend what-ifs (no manufactured ROAS), and inventory cover.</p>`
     }
   </section>
 
@@ -1899,6 +1904,7 @@ function renderForecast(ctx) {
 </div>`;
   }
   const mtd = fc.month_to_date || {};
+  const base = fc.scenarios?.BASE || {};
   const scenRows = ["CONSERVATIVE", "BASE", "UPSIDE"]
     .map((k) => {
       const s = fc.scenarios?.[k];
@@ -1909,6 +1915,7 @@ function renderForecast(ctx) {
         <td>${money(s.projected_revenue, cur)}</td>
         <td>${num(s.projected_orders, 0)}</td>
         <td>${money(s.projected_gross_profit, cur)}</td>
+        <td>${money(s.projected_profit_before_ads, cur)}</td>
         <td>${money(s.projected_meta_spend, cur)}</td>
         <td>${money(s.projected_profit_after_meta, cur)}</td>
       </tr>`;
@@ -1919,6 +1926,8 @@ function renderForecast(ctx) {
       (s) => `<tr>
       <td>${escapeHtml(s.label)}</td>
       <td>${money(s.projected_meta_spend, cur)}</td>
+      <td>${money(s.projected_profit_before_ads, cur)}</td>
+      <td>${money(s.projected_profit_after_meta, cur)}</td>
       <td>${escapeHtml(s.known)}</td>
       <td class="tone-warn">${escapeHtml(s.unknown)}</td>
     </tr>`
@@ -1950,48 +1959,114 @@ function renderForecast(ctx) {
     )
     .join("");
 
+  const planningCards = [];
+  if (fc.planning?.target_gross_profit != null) {
+    planningCards.push(
+      card(
+        "Target gross profit",
+        money(fc.planning.target_gross_profit, cur),
+        "Gross profit only — not net after ads",
+        "neutral",
+        null,
+        "CALCULATED"
+      )
+    );
+    planningCards.push(
+      card(
+        "Revenue required for target gross profit",
+        money(fc.planning.revenue_required_for_target_gross_profit, cur),
+        "Uses observed gross margin only",
+        "neutral",
+        null,
+        "FORECAST"
+      )
+    );
+  }
+  if (fc.planning?.target_profit_after_meta != null) {
+    planningCards.push(
+      card(
+        "Target profit after Meta (requested)",
+        money(fc.planning.target_profit_after_meta, cur),
+        fc.planning.target_profit_revenue_suppressed
+          ? "Revenue path suppressed — insufficient defensible inputs"
+          : "",
+        "warn",
+        null,
+        "CALCULATED"
+      )
+    );
+  }
+  if (fc.planning?.orders_required_at_current_aov != null) {
+    planningCards.push(
+      card(
+        "Orders at current AOV (gross-profit target)",
+        num(fc.planning.orders_required_at_current_aov, 0),
+        "",
+        "neutral",
+        TIPS.aov
+      )
+    );
+  }
+  if (fc.planning?.max_affordable_meta_spend_mtd_buffer != null) {
+    planningCards.push(
+      card(
+        "Max affordable Meta (MTD pre-ad buffer)",
+        money(fc.planning.max_affordable_meta_spend_mtd_buffer, cur)
+      )
+    );
+  }
+
   return `<div id="view-forecast" class="view">
   <section class="hero-section">
     <div class="eyebrow">Planning · scenarios</div>
     <h2>Forecast ${sourceBadgeHtml("FORECAST")}</h2>
-    <p class="callout warning"><strong>FORECAST — NOT ACTUAL.</strong> These are deterministic pace projections. They are never written into Books, Ledger, Shopify, or Meta.</p>
-    <p class="note">Confidence: <strong>${escapeHtml(String(fc.confidence || "—"))}</strong> — ${escapeHtml(fc.confidence_note || "")}</p>
+    <p class="callout warning"><strong>FORECAST — NOT ACTUAL.</strong> Deterministic pace projections only. Never written into Books, Ledger, Shopify, or Meta.</p>
+    <p class="confidence-banner">Confidence: <strong>${escapeHtml(String(fc.confidence || "—"))}</strong> — ${escapeHtml(fc.confidence_note || "")}</p>
     <p class="note">${escapeHtml(fc.mtd_source_note || "")}</p>
+    <h3>ACTUAL MTD</h3>
     <div class="grid key-grid">
-      ${card("MTD recognized revenue", money(mtd.revenue, cur), mtd.label || "ACTUAL", "neutral", tipText("net_revenue"), "BOOKS")}
-      ${card("MTD orders", num(mtd.orders, 0), "", "neutral", TIPS.recognized_order, "BOOKS")}
-      ${card("MTD gross profit", money(mtd.gross_profit, cur), "", "neutral", tipText("gross_profit"), "BOOKS")}
-      ${card("MTD Meta spend", money(mtd.meta_spend, cur), "", "neutral", tipText("meta_spend"), "META")}
-      ${card("MTD profit after Meta", money(mtd.profit_after_meta, cur), "", "neutral", TIPS.meta_adjusted_profit, "CALCULATED")}
+      ${card("ACTUAL MTD revenue", money(mtd.revenue, cur), mtd.label || "ACTUAL", "neutral", tipText("net_revenue"), "BOOKS")}
+      ${card("ACTUAL MTD orders", num(mtd.orders, 0), "", "neutral", TIPS.recognized_order, "BOOKS")}
+      ${card("ACTUAL MTD gross profit", money(mtd.gross_profit, cur), "", "neutral", tipText("gross_profit"), "BOOKS")}
+      ${card("ACTUAL MTD pre-ad profit", money(mtd.profit_before_ads, cur), "", "neutral", null, "CALCULATED")}
+      ${card("ACTUAL MTD Meta spend", money(mtd.meta_spend, cur), "", "neutral", tipText("meta_spend"), "META")}
+      ${card("ACTUAL MTD profit after Meta", money(mtd.profit_after_meta, cur), "", "neutral", TIPS.meta_adjusted_profit, "CALCULATED")}
+    </div>
+    <h3>BASE month-end forecast ${sourceBadgeHtml("FORECAST")}</h3>
+    <div class="grid key-grid">
+      ${card("FORECAST revenue", money(base.projected_revenue, cur), "Base scenario", "neutral", TIPS.forecast, "FORECAST")}
+      ${card("FORECAST pre-ad profit", money(base.projected_profit_before_ads, cur), "Sales-pace estimate — not causal", "neutral", TIPS.forecast, "FORECAST")}
+      ${card("FORECAST Meta spend", money(base.projected_meta_spend, cur), "Spend-pace estimate", "neutral", TIPS.forecast, "FORECAST")}
+      ${card("FORECAST profit after Meta", money(base.projected_profit_after_meta, cur), "Pre-ad profit − Meta spend", "neutral", TIPS.forecast, "FORECAST")}
       ${card("Days left in month", num(fc.calendar_month?.days_remaining, 0), `${escapeHtml(fc.calendar_month?.since || "")} → ${escapeHtml(fc.calendar_month?.until || "")}`)}
     </div>
   </section>
   <section>
     <h2>Month-end scenarios</h2>
-    <p class="note">Conservative assumes weaker sales. Base assumes recent pace continues. Upside assumes stronger sales without unlimited ad scalability.</p>
+    <p class="note">Profit after Meta = projected pre-ad profit − projected Meta spend. Pre-ad profit follows the <strong>sales</strong> factor; Meta spend follows the <strong>spend</strong> factor. No causal revenue from higher spend.</p>
     <div class="table-wrap"><table>
-      <thead><tr><th>Scenario</th><th>Assumption</th><th>Revenue</th><th>Orders</th><th>Gross profit</th><th>Meta spend</th><th>Profit after Meta</th></tr></thead>
-      <tbody>${scenRows || `<tr><td colspan="7" class="empty-state">No scenarios.</td></tr>`}</tbody>
+      <thead><tr><th>Scenario</th><th>Assumption</th><th>FORECAST revenue</th><th>Orders</th><th>Gross profit</th><th>FORECAST pre-ad profit</th><th>FORECAST Meta spend</th><th>FORECAST profit after Meta</th></tr></thead>
+      <tbody>${scenRows || `<tr><td colspan="8" class="empty-state">No scenarios.</td></tr>`}</tbody>
     </table></div>
   </section>
   <section>
     <h2>Meta spend what-ifs</h2>
-    <p class="note">Changing spend is <strong>known</strong>. Incremental revenue is <strong>unknown</strong> — we do not invent causal ROAS.</p>
+    <p class="note">Changing spend is <strong>known</strong>. Incremental revenue is <strong>unknown</strong> — pre-ad profit is held at base pace (no causal ROAS).</p>
     <div class="table-wrap"><table>
-      <thead><tr><th>Scenario</th><th>Projected Meta spend</th><th>Known</th><th>Unknown</th></tr></thead>
-      <tbody>${spendRows || `<tr><td colspan="4" class="empty-state">No spend scenarios.</td></tr>`}</tbody>
+      <thead><tr><th>Scenario</th><th>FORECAST Meta spend</th><th>FORECAST pre-ad profit (held)</th><th>FORECAST profit after Meta</th><th>Known</th><th>Unknown</th></tr></thead>
+      <tbody>${spendRows || `<tr><td colspan="6" class="empty-state">No spend scenarios.</td></tr>`}</tbody>
     </table></div>
   </section>
   ${
     fc.planning
       ? `<section>
-    <h2>Target planning (rough)</h2>
-    <div class="grid">
-      ${card("Target profit", money(fc.planning.target_profit, cur))}
-      ${card("Revenue required (rough)", money(fc.planning.revenue_required_rough, cur))}
-      ${card("Orders at current AOV", num(fc.planning.orders_required_at_current_aov, 0), "", "neutral", TIPS.aov)}
-      ${card("Max affordable Meta (MTD buffer)", money(fc.planning.max_affordable_meta_spend_mtd_buffer, cur))}
-    </div>
+    <h2>Target planning</h2>
+    <div class="grid">${planningCards.join("") || `<p class="empty-state">No planning targets set.</p>`}</div>
+    ${
+      fc.planning.target_profit_revenue_suppressed
+        ? `<p class="callout warning"><strong>Net target revenue suppressed.</strong> ${escapeHtml(fc.planning.target_profit_suppression_reason || "")}</p>`
+        : ""
+    }
     <p class="note">${escapeHtml(fc.planning.note || "")}</p>
   </section>`
       : ""
@@ -2212,6 +2287,15 @@ header.hero h1 {
 .why-expand summary { cursor: pointer; color: var(--accent-dark); font-weight: 600; }
 .freshness-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .period-line { color: var(--muted); font-size: 14px; margin: 6px 0 0; }
+.confidence-banner {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--warn-bg);
+  border: 1px solid #fde68a;
+  font-size: 14px;
+  color: var(--ink);
+}
 .btn-print {
   margin-left: auto;
   min-height: 36px;

@@ -257,6 +257,11 @@ async function enrichBundlePhases(bundle, dateRange, args = {}) {
     as_of: dateRange.until,
     attribution_capture_started:
       process.env.ATTRIBUTION_CAPTURE_STARTED || null,
+    target_profit: args.target_profit != null ? Number(args.target_profit) : null,
+    target_gross_profit:
+      args.target_gross_profit != null
+        ? Number(args.target_gross_profit)
+        : null,
   });
 
   delete bundle._pricing_vm;

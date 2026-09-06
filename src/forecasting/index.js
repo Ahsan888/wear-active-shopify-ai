@@ -8,6 +8,8 @@ const {
   pace,
   projectRemaining,
   assessForecastConfidence,
+  reconcileScenarioProfit,
+  buildTargetPlanning,
   buildMonthForecast,
   buildInventoryForecast,
 } = require("./build");
@@ -19,6 +21,8 @@ module.exports = {
   pace,
   projectRemaining,
   assessForecastConfidence,
+  reconcileScenarioProfit,
+  buildTargetPlanning,
   buildMonthForecast,
   buildInventoryForecast,
 };
