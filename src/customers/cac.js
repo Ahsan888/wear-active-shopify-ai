@@ -1,7 +1,18 @@
 /**
  * First-party observed new-customer CAC and observed GP:CAC.
+ * Denominator is post_capture Meta first-party new customers only.
  */
 const { round2 } = require("../books/tax");
+
+function isFpCacEligible(c, periodSince, periodUntil) {
+  return (
+    Boolean(c?.identified) &&
+    c.first_order_date >= periodSince &&
+    c.first_order_date <= periodUntil &&
+    c.first_order_acquisition === "Meta" &&
+    c.first_order_attribution_phase === "post_capture"
+  );
+}
 
 /**
  * @param {object} opts
@@ -9,7 +20,7 @@ const { round2 } = require("../books/tax");
  * @param {string} opts.periodSince
  * @param {string} opts.periodUntil
  * @param {number} opts.metaSpendTotal - Meta spend for the analysis period
- * @param {number} [opts.attributionCoveragePct] - post-capture attributed coverage if known
+ * @param {number|null} opts.attributionCoveragePct - Phase 5 post-capture attributed coverage
  */
 function buildObservedCac(opts = {}) {
   const {
@@ -20,17 +31,23 @@ function buildObservedCac(opts = {}) {
     attributionCoveragePct = null,
   } = opts;
 
-  // New customers whose first order falls in period and acquisition is Meta
-  const metaNew = customers.filter(
+  const metaNew = customers.filter((c) =>
+    isFpCacEligible(c, periodSince, periodUntil)
+  );
+
+  // Diagnostic: Meta acquisition in period but pre_capture (excluded from CAC)
+  const preCaptureMetaNew = customers.filter(
     (c) =>
       c.identified &&
       c.first_order_date >= periodSince &&
       c.first_order_date <= periodUntil &&
-      c.first_order_acquisition === "Meta"
+      c.first_order_acquisition === "Meta" &&
+      c.first_order_attribution_phase === "pre_capture"
   );
 
   const denom = metaNew.length;
   const spend = Number(metaSpendTotal) || 0;
+  // Zero eligible → null (not 0)
   const cac = denom > 0 ? round2(spend / denom) : null;
 
   const observedGp = metaNew.reduce(
@@ -69,29 +86,35 @@ function buildObservedCac(opts = {}) {
       : null;
 
   let confidence = "insufficient";
-  if (denom >= 30 && (attributionCoveragePct == null || attributionCoveragePct >= 50)) {
+  if (denom >= 30 && attributionCoveragePct != null && attributionCoveragePct >= 50) {
     confidence = "high";
-  } else if (denom >= 15) {
+  } else if (denom >= 15 && attributionCoveragePct != null && attributionCoveragePct >= 40) {
     confidence = "medium";
   } else if (denom >= 5) {
     confidence = "low";
   } else {
     confidence = "insufficient";
   }
-  if (
-    attributionCoveragePct != null &&
-    attributionCoveragePct < 25 &&
-    confidence !== "insufficient"
-  ) {
-    confidence = "low";
+
+  // Low / missing Phase 5 coverage caps confidence
+  if (attributionCoveragePct == null) {
+    if (confidence === "high" || confidence === "medium") confidence = "low";
+    if (denom < 5) confidence = "insufficient";
+  } else if (attributionCoveragePct < 25) {
+    if (confidence !== "insufficient") confidence = "low";
+    if (denom < 5) confidence = "insufficient";
+  } else if (attributionCoveragePct < 40 && confidence === "high") {
+    confidence = "medium";
   }
 
   return {
     label: "FIRST-PARTY OBSERVED NEW-CUSTOMER CAC",
     definition:
-      "Period Meta spend ÷ identified customers whose first recognized order in period has first-party Meta acquisition. Not Meta-reported purchase CAC.",
+      "Period Meta spend ÷ identified customers whose first recognized order in period is post_capture with first-party Meta acquisition. Pre-capture journey Meta is excluded from this denominator.",
     meta_spend: round2(spend),
     meta_new_customers: denom,
+    post_capture_meta_new_customers: denom,
+    pre_capture_meta_new_customers_excluded: preCaptureMetaNew.length,
     first_party_observed_new_customer_cac: cac,
     observed_revenue_per_customer: revPerCustomer,
     observed_gp_per_customer: gpPerCustomer,
@@ -100,15 +123,18 @@ function buildObservedCac(opts = {}) {
     observed_gp_cac_ratio: observedGpCac,
     observed_gp_cac_label: "OBSERVED GP:CAC",
     first_order_gp_after_observed_cac: firstOrderGpAfterCac,
+    attribution_coverage_pct: attributionCoveragePct,
     confidence,
     notes: [
       "Not LTV:CAC — customer history is incomplete (observed value only).",
       "Does not mix Books customer counts with Meta-reported purchases.",
-      "Unattributed customers are not allocated into Meta.",
+      "Unattributed / organic / pre_capture Meta customers are not in the CAC denominator.",
+      "Observed GP:CAC and first_order_gp_after_observed_cac use the same post_capture-only set.",
     ],
   };
 }
 
 module.exports = {
   buildObservedCac,
+  isFpCacEligible,
 };

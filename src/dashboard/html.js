@@ -1356,12 +1356,13 @@ function renderCustomers(ctx) {
   <section>
     <div class="divider-label">CUSTOMER &amp; COHORT ECONOMICS</div>
     <h2>Customer Overview</h2>
-    <p class="note">Recognized Shopify + Ledger economics. Identity via Shopify customer ID (email hashed only if needed). Confidence: <strong>${escapeHtml(cust.confidence || "—")}</strong>.</p>
+    <p class="note">Recognized Shopify + Ledger economics. New/Returning = within loaded history only (not proven lifetime-first). Identity via Shopify customer ID (email hashed only if needed). Confidence: <strong>${escapeHtml(cust.confidence || "—")}</strong>.</p>
     <div class="grid">
       ${card("Identified customers", num(s.recognized_customers_identified, 0))}
-      ${card("New", num(s.new_customers, 0))}
-      ${card("Returning", num(s.returning_customers, 0))}
+      ${card("New (observed hist.)", num(s.new_in_observed_history_customers ?? s.new_customers, 0))}
+      ${card("Returning (observed)", num(s.returning_in_observed_history_customers ?? s.returning_customers, 0))}
       ${card("Guest/unknown", num(s.guest_unknown_customers, 0))}
+      ${card("History join coverage", s.history_join_coverage_pct == null ? "—" : pct(s.history_join_coverage_pct), `missing ${num(s.recognized_orders_missing_shopify_match_count, 0)}`)}
       ${card("Orders", num(s.recognized_orders, 0))}
       ${card("Revenue", money(s.revenue))}
       ${card("GP", money(s.gross_profit))}
@@ -1415,13 +1416,15 @@ function renderCustomers(ctx) {
   </section>
   <section>
     <h2>Observed CAC</h2>
-    <p class="note">${escapeHtml(cac.label || "FIRST-PARTY OBSERVED NEW-CUSTOMER CAC")} · ${escapeHtml(cac.observed_gp_cac_label || "OBSERVED GP:CAC")} (not LTV:CAC). Confidence: <strong>${escapeHtml(cac.confidence || "—")}</strong>.</p>
+    <p class="note">${escapeHtml(cac.label || "FIRST-PARTY OBSERVED NEW-CUSTOMER CAC")} · ${escapeHtml(cac.observed_gp_cac_label || "OBSERVED GP:CAC")} (post_capture Meta-new only; not LTV:CAC). Confidence: <strong>${escapeHtml(cac.confidence || "—")}</strong>.</p>
     <div class="grid">
       ${card("Meta spend", money(cac.meta_spend))}
-      ${card("Meta new customers", num(cac.meta_new_customers, 0))}
+      ${card("Post-capture Meta-new", num(cac.post_capture_meta_new_customers ?? cac.meta_new_customers, 0))}
+      ${card("Pre-capture excluded", num(cac.pre_capture_meta_new_customers_excluded, 0))}
       ${card("FP observed CAC", money(cac.first_party_observed_new_customer_cac))}
       ${card("Obs. GP/customer", money(cac.observed_gp_per_customer))}
       ${card("Observed GP:CAC", num(cac.observed_gp_cac_ratio, 2))}
+      ${card("Attr. coverage", cac.attribution_coverage_pct == null ? "—" : pct(cac.attribution_coverage_pct))}
       ${card("Observed Rev:CAC", num(cac.observed_revenue_cac_ratio, 2))}
     </div>
   </section>

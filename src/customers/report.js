@@ -36,17 +36,32 @@ function printCustomerReport(report) {
   console.log("WEAR ACTIVE — CUSTOMER & COHORT ECONOMICS");
   console.log("=========================================");
   console.log(`Period: ${p.since} → ${p.until}`);
+  const h = report.history || {};
+  if (h.history_since) {
+    console.log(
+      `History window: ${h.history_since} → ${h.history_until} (${num(h.history_days, 0)}d)`
+    );
+  }
   console.log(`Confidence: ${report.confidence || "—"}`);
-  console.log("Advisory only — observed value, not predictive LTV. No CRM/Shopify writes.");
+  console.log(
+    "Advisory only — observed value within loaded history, not predictive LTV. No CRM/Shopify writes."
+  );
   console.log("");
 
   console.log("SUMMARY");
-  console.log(`  Recognized orders:        ${num(s.recognized_orders, 0)}`);
+  console.log(`  Recognized orders (joined):   ${num(s.recognized_orders, 0)}`);
+  console.log(
+    `  History join coverage:       ${s.history_join_coverage_pct == null ? "—" : pct(s.history_join_coverage_pct)} (${num(s.joined_recognized_shopify_orders, 0)}/${num(s.ledger_recognized_shopify_orders, 0)}; missing=${num(s.recognized_orders_missing_shopify_match_count, 0)})`
+  );
   console.log(
     `  Identified customers:     ${num(s.recognized_customers_identified, 0)}`
   );
-  console.log(`  New customers:            ${num(s.new_customers, 0)}`);
-  console.log(`  Returning customers:      ${num(s.returning_customers, 0)}`);
+  console.log(
+    `  New (in observed history):   ${num(s.new_in_observed_history_customers ?? s.new_customers, 0)}`
+  );
+  console.log(
+    `  Returning (observed hist.):  ${num(s.returning_in_observed_history_customers ?? s.returning_customers, 0)}`
+  );
   console.log(`  Guest/unknown:            ${num(s.guest_unknown_customers, 0)}`);
   console.log(`  First orders:             ${num(s.first_orders, 0)}`);
   console.log(`  Repeat orders:            ${num(s.repeat_orders, 0)}`);
@@ -60,10 +75,16 @@ function printCustomerReport(report) {
   console.log(`  Guest order share:        ${pct(s.guest_order_share_pct)}`);
   console.log("");
 
-  console.log("NEW VS RETURNING");
-  printBucket("New customer orders", report.new_vs_returning?.new_customer_orders || {});
+  console.log("NEW VS RETURNING (OBSERVED HISTORY)");
+  console.log(
+    `  ${report.new_vs_returning?.definition || "New/returning relative to loaded history only."}`
+  );
   printBucket(
-    "Returning customer orders",
+    "New-in-observed-history orders",
+    report.new_vs_returning?.new_customer_orders || {}
+  );
+  printBucket(
+    "Returning-in-observed-history orders",
     report.new_vs_returning?.returning_customer_orders || {}
   );
   console.log("");
@@ -131,7 +152,12 @@ function printCustomerReport(report) {
   const cac = report.observed_cac || {};
   console.log(`  ${cac.label}`);
   console.log(`  Meta spend: ${money(cac.meta_spend)}`);
-  console.log(`  Meta new customers (FP): ${num(cac.meta_new_customers, 0)}`);
+  console.log(
+    `  Post-capture Meta-new customers: ${num(cac.post_capture_meta_new_customers ?? cac.meta_new_customers, 0)}`
+  );
+  console.log(
+    `  Pre-capture Meta-new excluded: ${num(cac.pre_capture_meta_new_customers_excluded, 0)}`
+  );
   console.log(
     `  FP observed new-customer CAC: ${money(cac.first_party_observed_new_customer_cac)}`
   );
@@ -140,6 +166,9 @@ function printCustomerReport(report) {
   );
   console.log(
     `  ${cac.observed_gp_cac_label || "OBSERVED GP:CAC"}: ${num(cac.observed_gp_cac_ratio, 2)}`
+  );
+  console.log(
+    `  Attr. coverage (post-capture): ${cac.attribution_coverage_pct == null ? "—" : pct(cac.attribution_coverage_pct)}`
   );
   console.log(`  Confidence: ${cac.confidence}`);
   console.log("");

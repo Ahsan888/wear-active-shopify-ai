@@ -57,12 +57,46 @@ async function main() {
     history.until
   );
 
+  // Phase 5 post-capture attribution coverage for CAC confidence
+  let attributionCoveragePct = null;
+  try {
+    const {
+      buildAttributedEconomics,
+    } = require("../attribution/entityEconomics");
+    const periodLedger = indexRecognizedShopifyOrderEconomics(
+      ledger.data,
+      ledger.header,
+      period.since,
+      period.until
+    );
+    const periodOrders = orders.filter((o) => {
+      const ymd = String(o.createdAt || "").slice(0, 10);
+      return ymd >= period.since && ymd <= period.until;
+    });
+    const econ = buildAttributedEconomics({
+      orders: periodOrders,
+      ledgerByOrderId: periodLedger,
+      metaEntities: {
+        campaigns: inputs.campaigns || [],
+        adsets: inputs.adsets || [],
+        ads: inputs.ads || [],
+      },
+      meta_spend_total: inputs.meta?.totals?.spend || 0,
+      shopify_channel: inputs.sales_by_channel?.Shopify || {},
+      period,
+    });
+    attributionCoveragePct = econ.account?.attributed_coverage_pct ?? null;
+  } catch {
+    attributionCoveragePct = null;
+  }
+
   const report = buildCustomerEconomics({
     orders,
     ledgerByOrderId,
     period,
     history,
     meta_spend_total: inputs.meta?.totals?.spend || 0,
+    attribution_coverage_pct: attributionCoveragePct,
   });
 
   // Never emit raw email

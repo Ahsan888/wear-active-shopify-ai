@@ -53,10 +53,11 @@ function buildRecognizedCustomerOrders({
     const econ = lookupOrderEconomics(ledgerByOrderId, order);
     if (!econ || !econ.has_sale) continue;
 
+    // Canonical key = Ledger order id so join coverage reconciles
     const orderId =
+      econ.order_id ||
       shopifyOrderIdFromGid(order.id) ||
-      normalizeShopifyOrderKey(order.name) ||
-      econ.order_id;
+      normalizeShopifyOrderKey(order.name);
     if (!orderId) continue;
     if (byOrderId.has(orderId)) continue; // duplicate prevention
 
@@ -150,8 +151,9 @@ function buildRecognizedCustomerOrders({
 }
 
 /**
- * Assign lifetime order_sequence and new_or_returning across full history rows.
+ * Assign order_sequence and new/returning within loaded observed history.
  * Guest keys never merge across orders (each guest:{id} is unique).
+ * Labels are history-scoped — not proven lifetime-first.
  */
 function assignOrderSequences(rows = []) {
   const byCustomer = new Map();
@@ -167,7 +169,8 @@ function assignOrderSequences(rows = []) {
     );
     list.forEach((row, idx) => {
       row.order_sequence = idx + 1;
-      row.new_or_returning = idx === 0 ? "new" : "returning";
+      row.new_or_returning =
+        idx === 0 ? "new_in_observed_history" : "returning_in_observed_history";
     });
   }
   return rows;

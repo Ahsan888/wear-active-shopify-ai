@@ -97,6 +97,8 @@ function buildCustomerValues(allRows = [], asOfUntil) {
       first_order_date: first.order_date,
       latest_order_date: last.order_date,
       first_order_acquisition: first.acquisition,
+      first_order_attribution_phase: first.attribution_phase || null,
+      first_order_attribution_usable: Boolean(first.attribution_usable),
       first_order_meta_campaign_id: first.meta_campaign_id,
       first_order_meta_ad_id: first.meta_ad_id,
       recognized_orders: n,
@@ -248,6 +250,13 @@ function attachFirstOrderEconomics(customers, allRows) {
     c.first_order_revenue = first ? Number(first.net_revenue_ex_tax) || 0 : 0;
     c.first_order_gp = first ? Number(first.gross_profit) || 0 : 0;
     c.first_order_cogs = first ? Number(first.cogs) || 0 : 0;
+    if (first) {
+      c.first_order_acquisition = first.acquisition;
+      c.first_order_attribution_phase = first.attribution_phase || null;
+      c.first_order_attribution_usable = Boolean(first.attribution_usable);
+      c.first_order_meta_campaign_id = first.meta_campaign_id || null;
+      c.first_order_meta_ad_id = first.meta_ad_id || null;
+    }
   }
   return customers;
 }
@@ -298,12 +307,27 @@ function buildNewVsReturning(periodRows = []) {
   const neu = emptyBucket();
   const ret = emptyBucket();
   for (const row of periodRows) {
-    if (row.new_or_returning === "new") addToBucket(neu, row);
-    else if (row.new_or_returning === "returning") addToBucket(ret, row);
+    if (
+      row.new_or_returning === "new_in_observed_history" ||
+      row.new_or_returning === "new"
+    ) {
+      addToBucket(neu, row);
+    } else if (
+      row.new_or_returning === "returning_in_observed_history" ||
+      row.new_or_returning === "returning"
+    ) {
+      addToBucket(ret, row);
+    }
   }
+  const newBucket = finalizeBucket(neu);
+  const retBucket = finalizeBucket(ret);
   return {
-    new_customer_orders: finalizeBucket(neu),
-    returning_customer_orders: finalizeBucket(ret),
+    definition:
+      "New = first recognized Shopify order within loaded customer history (not proven lifetime-first). Returning = subsequent order in observed history.",
+    new_customer_orders: newBucket,
+    returning_customer_orders: retBucket,
+    new_in_observed_history_orders: newBucket,
+    returning_in_observed_history_orders: retBucket,
   };
 }
 
@@ -324,8 +348,16 @@ function buildPeriodSummary(periodRows, customersTouchingPeriod, allCustomers) {
     if (!c) continue;
     // In-period: new if any period order is sequence 1; returning if any is returning
     const periodOrders = periodRows.filter((r) => r.customer_key === key);
-    const hasNew = periodOrders.some((r) => r.new_or_returning === "new");
-    const hasRet = periodOrders.some((r) => r.new_or_returning === "returning");
+    const hasNew = periodOrders.some(
+      (r) =>
+        r.new_or_returning === "new_in_observed_history" ||
+        r.new_or_returning === "new"
+    );
+    const hasRet = periodOrders.some(
+      (r) =>
+        r.new_or_returning === "returning_in_observed_history" ||
+        r.new_or_returning === "returning"
+    );
     if (hasNew) newCustomers += 1;
     if (hasRet) returningCustomers += 1;
   }
@@ -351,9 +383,13 @@ function buildPeriodSummary(periodRows, customersTouchingPeriod, allCustomers) {
     recognized_customers_identified: identifiedCustomerCount,
     new_customers: newCustomers,
     returning_customers: returningCustomers,
+    new_in_observed_history_customers: newCustomers,
+    returning_in_observed_history_customers: returningCustomers,
     guest_unknown_customers: guestKeys.size,
     first_orders: firstOrders,
     repeat_orders: repeatOrders,
+    new_returning_definition:
+      "New/returning are relative to loaded observed history only — not proven lifetime first purchase.",
     revenue: round2(revenue),
     cogs: round2(cogs),
     gross_profit: round2(gp),
@@ -368,7 +404,6 @@ function buildPeriodSummary(periodRows, customersTouchingPeriod, allCustomers) {
       identifiedCustomerCount > 0
         ? round2(gp / identifiedCustomerCount)
         : null,
-    // Repeat customer rate = identified customers with ≥2 lifetime orders / identified customers in period
     repeat_customer_rate_pct:
       identifiedCustomerCount > 0
         ? round2((repeatCustomerCount / identifiedCustomerCount) * 100)

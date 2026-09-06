@@ -178,6 +178,8 @@ async function main() {
       period: dateRange,
       history,
       meta_spend_total: inputs.meta?.totals?.spend || 0,
+      attribution_coverage_pct:
+        bundle.attribution_economics?.account?.attributed_coverage_pct ?? null,
     });
     // Trim embed size; never include raw PII
     report.customers = (report.customers || []).slice(0, 100);

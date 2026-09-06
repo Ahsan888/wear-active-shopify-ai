@@ -3,6 +3,7 @@
  */
 const { round2 } = require("../books/tax");
 const { assertYmd } = require("../operations/dates");
+const { daysBetweenYmd } = require("./dates");
 const {
   buildRecognizedCustomerOrders,
   assignOrderSequences,
@@ -18,9 +19,9 @@ const {
 } = require("./metrics");
 const { buildObservedCac } = require("./cac");
 
+const HISTORY_JOIN_COMPLETE_PCT = 95;
+
 function detectCustomerIdCollisions(rows = []) {
-  // Same shopify customer id under different keys should not happen;
-  // flag if same order_id appears twice (already prevented) or key maps inconsistently.
   const byCustId = new Map();
   const collisions = [];
   for (const row of rows) {
@@ -37,36 +38,86 @@ function detectCustomerIdCollisions(rows = []) {
   return collisions;
 }
 
-function reportConfidence({ summary, repurchase, cohorts, cac }) {
+function computeHistoryJoinCoverage(joinedRows, ledgerByOrderId, missingIds) {
+  let ledgerRecognized = 0;
+  for (const econ of ledgerByOrderId?.values?.() || []) {
+    if (econ?.has_sale) ledgerRecognized += 1;
+  }
+  const joinedLedgerIds = new Set(
+    (joinedRows || []).map((r) => String(r.order_id))
+  );
+  let matched = 0;
+  const missing = [];
+  for (const [orderId, econ] of ledgerByOrderId || []) {
+    if (!econ?.has_sale) continue;
+    if (joinedLedgerIds.has(String(orderId))) matched += 1;
+    else missing.push(orderId);
+  }
+  // Prefer recomputed missing; fall back to provided list length for tests
+  const missingList = missing.length ? missing : missingIds || [];
+  const coveragePct =
+    ledgerRecognized > 0 ? round2((matched / ledgerRecognized) * 100) : null;
+  const incomplete =
+    coveragePct == null
+      ? false
+      : coveragePct < HISTORY_JOIN_COMPLETE_PCT || missingList.length > 0;
+  return {
+    ledger_recognized_shopify_orders: ledgerRecognized,
+    joined_recognized_shopify_orders: matched,
+    recognized_orders_missing_shopify_match_count: missingList.length,
+    history_join_coverage_pct: coveragePct,
+    history_incomplete: incomplete,
+  };
+}
+
+function reportConfidence({
+  summary,
+  cohorts,
+  cac,
+  historyJoin,
+}) {
   const identified = summary.recognized_customers_identified || 0;
-  const repeat = summary.repeat_customer_rate_pct;
   const matureCohorts = (cohorts || []).filter(
     (c) => c.repeat_by_90d?.matured
   ).length;
   const cacConf = cac?.confidence || "insufficient";
 
-  if (identified < 5) return "insufficient";
-  if (identified < 20 || cacConf === "insufficient") return "low";
-  if (identified >= 50 && matureCohorts >= 1 && (repeat == null || repeat >= 0)) {
-    if (cacConf === "high" || cacConf === "medium") return "medium";
+  let conf = "low";
+  if (identified < 5) conf = "insufficient";
+  else if (identified < 20 || cacConf === "insufficient") conf = "low";
+  else if (
+    identified >= 50 &&
+    matureCohorts >= 1 &&
+    (cacConf === "high" || cacConf === "medium")
+  ) {
+    conf = "medium";
+  } else if (identified >= 100 && matureCohorts >= 2 && cacConf === "high") {
+    conf = "high";
   }
-  if (identified >= 100 && matureCohorts >= 2 && cacConf === "high") return "high";
-  return "low";
+
+  if (historyJoin?.history_incomplete) {
+    if (conf === "high") conf = "medium";
+    else if (conf === "medium") conf = "low";
+    // already low/insufficient stays
+  }
+  return conf;
 }
 
 /**
  * @param {object} input
- * @param {object[]} input.orders - Shopify GraphQL orders (history window)
- * @param {Map} input.ledgerByOrderId - recognized economics for history window
- * @param {{ since: string, until: string }} input.period - analysis period
- * @param {number} [input.meta_spend_total]
- * @param {number} [input.attribution_coverage_pct]
- * @param {string} [input.capture_started_at]
- * @param {{ since: string, until: string }} [input.history] - fetch window
  */
 function buildCustomerEconomics(input = {}) {
   const periodSince = assertYmd(input.period?.since, "period.since");
   const periodUntil = assertYmd(input.period?.until, "period.until");
+
+  let historySince = input.history?.since || null;
+  let historyUntil = input.history?.until || periodUntil;
+  if (historySince) assertYmd(historySince, "history.since");
+  if (historyUntil) assertYmd(historyUntil, "history.until");
+  const historyDays =
+    historySince && historyUntil
+      ? daysBetweenYmd(historySince, historyUntil) + 1
+      : null;
 
   const built = buildRecognizedCustomerOrders({
     orders: input.orders || [],
@@ -78,6 +129,26 @@ function buildCustomerEconomics(input = {}) {
   const periodRows = allRows.filter(
     (r) => r.order_date >= periodSince && r.order_date <= periodUntil
   );
+
+  const historyJoin = computeHistoryJoinCoverage(
+    allRows,
+    input.ledgerByOrderId,
+    built.data_quality.recognized_orders_missing_shopify_match
+  );
+  // Keep missing ID list in sync with recomputed coverage
+  if (
+    historyJoin.recognized_orders_missing_shopify_match_count !==
+    built.data_quality.recognized_orders_missing_shopify_match.length
+  ) {
+    // Recompute missing list from ledger for data_quality accuracy
+    const joinedIds = new Set(allRows.map((r) => String(r.order_id)));
+    const missing = [];
+    for (const [orderId, econ] of input.ledgerByOrderId || []) {
+      if (!econ?.has_sale) continue;
+      if (!joinedIds.has(String(orderId))) missing.push(orderId);
+    }
+    built.data_quality.recognized_orders_missing_shopify_match = missing;
+  }
 
   let customers = buildCustomerValues(allRows, periodUntil);
   customers = attachFirstOrderEconomics(customers, allRows);
@@ -104,12 +175,18 @@ function buildCustomerEconomics(input = {}) {
     customers.filter((c) => c.identified)
   );
 
+  // Always pass coverage through (may be null when zero post_capture recognized)
+  const attributionCoveragePct =
+    input.attribution_coverage_pct === undefined
+      ? null
+      : input.attribution_coverage_pct;
+
   const cac = buildObservedCac({
     customers: customers.filter((c) => c.identified),
     periodSince,
     periodUntil,
     metaSpendTotal: input.meta_spend_total || 0,
-    attributionCoveragePct: input.attribution_coverage_pct,
+    attributionCoveragePct,
   });
 
   const collisions = detectCustomerIdCollisions(allRows);
@@ -117,11 +194,11 @@ function buildCustomerEconomics(input = {}) {
     .filter((c) => !c.repeat_by_90d?.matured)
     .map((c) => c.cohort);
 
-  // Observed customer value summary (identified, touching period)
   const identifiedTouching = customersTouchingPeriod.filter((c) => c.identified);
   const observedValue = {
     label: "OBSERVED CUSTOMER VALUE",
-    note: "Not a predictive LTV. Based on recognized Shopify purchase history only.",
+    note:
+      "Not a predictive LTV. Based on recognized Shopify purchase history within the loaded history window only.",
     customers: identifiedTouching.length,
     average_orders:
       identifiedTouching.length > 0
@@ -157,6 +234,7 @@ function buildCustomerEconomics(input = {}) {
       repeat_customer: c.repeat_customer,
       cohort_month: c.cohort_month,
       first_order_acquisition: c.first_order_acquisition,
+      first_order_attribution_phase: c.first_order_attribution_phase,
     })),
   };
 
@@ -170,9 +248,9 @@ function buildCustomerEconomics(input = {}) {
 
   const confidence = reportConfidence({
     summary,
-    repurchase,
     cohorts,
     cac,
+    historyJoin,
   });
 
   const warnings = [];
@@ -181,9 +259,14 @@ function buildCustomerEconomics(input = {}) {
       `guest_orders:${built.data_quality.guest_order_count} (not merged across checkouts)`
     );
   }
-  if (built.data_quality.recognized_orders_missing_shopify_match.length) {
+  if (historyJoin.recognized_orders_missing_shopify_match_count) {
     warnings.push(
-      `recognized_ledger_orders_missing_shopify_fetch:${built.data_quality.recognized_orders_missing_shopify_match.length}`
+      `recognized_orders_missing_shopify_match:${historyJoin.recognized_orders_missing_shopify_match_count}`
+    );
+  }
+  if (historyJoin.history_incomplete) {
+    warnings.push(
+      `history_incomplete:join_coverage=${historyJoin.history_join_coverage_pct}% — do not claim true first-order certainty`
     );
   }
   if (built.data_quality.missing_cogs_order_ids.length) {
@@ -202,22 +285,32 @@ function buildCustomerEconomics(input = {}) {
     generated_at: new Date().toISOString(),
     advisory_only: true,
     period: { since: periodSince, until: periodUntil },
-    history: input.history || null,
+    history: {
+      history_since: historySince,
+      history_until: historyUntil,
+      history_days: historyDays,
+    },
     confidence,
     definitions: {
       recognized_order:
         "Shopify order with ≥1 recognized Ledger Sale in the history window (gift/PR excluded).",
-      new_order: "order_sequence === 1 in customer's recognized history.",
-      returning_order: "order_sequence >= 2.",
-      repeat_customer: "identified customer with ≥2 recognized orders.",
+      new_in_observed_history:
+        "First recognized Shopify order observed within the loaded customer history window — not proven lifetime-first.",
+      returning_in_observed_history:
+        "Subsequent recognized order for the same customer key within loaded history.",
+      repeat_customer:
+        "Identified customer with ≥2 recognized orders in observed history.",
       repeat_customer_rate:
-        "identified customers in period who are repeat customers / identified customers in period.",
+        "Identified customers in period who are repeat customers / identified customers in period.",
       observed_customer_value:
-        "Sum of recognized economics to date — not predictive LTV.",
+        "Sum of recognized economics in observed history — not predictive LTV.",
       first_party_observed_new_customer_cac:
-        "Period Meta spend / Meta-acquired new customers (first order in period).",
+        "Period Meta spend / identified customers whose first order in period is post_capture Meta first-party. Pre-capture Meta excluded.",
     },
-    summary,
+    summary: {
+      ...summary,
+      ...historyJoin,
+    },
     new_vs_returning: newVsReturning,
     observed_customer_value: observedValue,
     repurchase,
@@ -225,7 +318,6 @@ function buildCustomerEconomics(input = {}) {
     strongest_mature_cohort: strongestMature,
     acquisition_cohorts: acquisitionCohorts,
     observed_cac: cac,
-    // Keep full customer list available for JSON but strip if huge — include identified only
     customers: customers.filter((c) => c.identified),
     period_orders: periodRows.map((r) => ({
       order_id: r.order_id,
@@ -239,9 +331,13 @@ function buildCustomerEconomics(input = {}) {
       gross_profit: r.gross_profit,
       units: r.units,
       acquisition: r.acquisition,
+      attribution_phase: r.attribution_phase,
     })),
     data_quality: {
       ...built.data_quality,
+      ...historyJoin,
+      recognized_orders_missing_shopify_match:
+        built.data_quality.recognized_orders_missing_shopify_match,
       customer_id_collisions: collisions,
       immature_cohorts: immature,
       warnings,
@@ -249,8 +345,11 @@ function buildCustomerEconomics(input = {}) {
     sources: {
       orders: "Shopify GraphQL orders (customer.id + hashed email fallback)",
       economics: "Books Ledger recognized Sale/COGS via ledgerJoin",
-      attribution: "normalizeOrderAttribution first-party status on first order",
+      attribution:
+        "normalizeOrderAttribution; CAC uses post_capture Meta first-party only",
       meta_spend: "Decision/Meta period spend (read-only)",
+      attribution_coverage:
+        "Phase 5B post_capture attributed / post_capture recognized",
     },
   };
 }
@@ -259,4 +358,6 @@ module.exports = {
   buildCustomerEconomics,
   detectCustomerIdCollisions,
   reportConfidence,
+  computeHistoryJoinCoverage,
+  HISTORY_JOIN_COMPLETE_PCT,
 };

@@ -118,11 +118,11 @@ test("first-time / returning / third order sequencing", () => {
   });
   assignOrderSequences(rows);
   assert.strictEqual(rows[0].order_sequence, 1);
-  assert.strictEqual(rows[0].new_or_returning, "new");
+  assert.strictEqual(rows[0].new_or_returning, "new_in_observed_history");
   assert.strictEqual(rows[1].order_sequence, 2);
-  assert.strictEqual(rows[1].new_or_returning, "returning");
+  assert.strictEqual(rows[1].new_or_returning, "returning_in_observed_history");
   assert.strictEqual(rows[2].order_sequence, 3);
-  assert.strictEqual(rows[2].new_or_returning, "returning");
+  assert.strictEqual(rows[2].new_or_returning, "returning_in_observed_history");
 });
 
 test("duplicate order prevention", () => {
@@ -285,8 +285,10 @@ test("first-party Meta acquisition + unattributed customer", () => {
     ],
     ledgerByOrderId: ledger,
     period: { since: "2026-08-01", until: "2026-08-31" },
+    history: { since: "2026-08-01", until: "2026-08-31" },
     meta_spend_total: 3000,
     capture_started_at: "2026-08-01T00:00:00+05:00",
+    attribution_coverage_pct: 50,
   });
   const c55 = report.customers.find(
     (c) => c.customer_key === "shopify_customer:55"
@@ -295,20 +297,210 @@ test("first-party Meta acquisition + unattributed customer", () => {
     (c) => c.customer_key === "shopify_customer:56"
   );
   assert.strictEqual(c55.first_order_acquisition, "Meta");
+  assert.strictEqual(c55.first_order_attribution_phase, "post_capture");
   assert.ok(c56.first_order_acquisition !== "Meta");
   assert.strictEqual(report.observed_cac.meta_new_customers, 1);
   assert.strictEqual(
     report.observed_cac.first_party_observed_new_customer_cac,
     3000
   );
+  assert.strictEqual(report.observed_cac.attribution_coverage_pct, 50);
 });
 
-test("CAC denominator = Meta new customers only", () => {
+test("pre_capture Meta customer excluded from FP CAC", () => {
+  const metaAttrs = [
+    {
+      key: "_wa_attr",
+      value: JSON.stringify({
+        version: 1,
+        first_touch: {
+          source: "facebook",
+          medium: "paid",
+          campaign_id: "1",
+          ad_id: "2",
+          timestamp: "2026-07-01T12:00:00Z",
+        },
+        last_touch: {
+          source: "facebook",
+          medium: "paid",
+          campaign_id: "1",
+          ad_id: "2",
+          timestamp: "2026-07-01T12:00:00Z",
+        },
+      }),
+    },
+  ];
+  const report = buildCustomerEconomics({
+    orders: [
+      orderNode({
+        id: "701",
+        createdAt: "2026-07-15T12:00:00Z",
+        customerId: "701",
+        attrs: metaAttrs,
+      }),
+    ],
+    ledgerByOrderId: new Map([["701", econ("701", { rev: 1000, cogs: 400 })]]),
+    period: { since: "2026-07-01", until: "2026-07-31" },
+    history: { since: "2026-07-01", until: "2026-07-31" },
+    meta_spend_total: 5000,
+    capture_started_at: "2026-09-06",
+    attribution_coverage_pct: 80,
+  });
+  const c = report.customers[0];
+  assert.strictEqual(c.first_order_acquisition, "Meta");
+  assert.strictEqual(c.first_order_attribution_phase, "pre_capture");
+  // Still appears in acquisition cohorts diagnostically
+  assert.ok(
+    report.acquisition_cohorts.some(
+      (a) => a.acquisition === "Meta" && a.customers >= 1
+    )
+  );
+  assert.strictEqual(report.observed_cac.post_capture_meta_new_customers, 0);
+  assert.strictEqual(report.observed_cac.pre_capture_meta_new_customers_excluded, 1);
+  assert.strictEqual(report.observed_cac.first_party_observed_new_customer_cac, null);
+  assert.strictEqual(report.observed_cac.observed_gp_cac_ratio, null);
+  assert.strictEqual(report.observed_cac.first_order_gp_after_observed_cac, null);
+});
+
+test("post_capture Meta customer included in FP CAC", () => {
+  const metaAttrs = [
+    {
+      key: "_wa_attr",
+      value: JSON.stringify({
+        version: 1,
+        first_touch: {
+          source: "facebook",
+          medium: "paid",
+          campaign_id: "9",
+          ad_id: "8",
+          timestamp: "2026-09-07T12:00:00Z",
+        },
+        last_touch: {
+          source: "facebook",
+          medium: "paid",
+          campaign_id: "9",
+          ad_id: "8",
+          timestamp: "2026-09-07T12:00:00Z",
+        },
+      }),
+    },
+  ];
+  const report = buildCustomerEconomics({
+    orders: [
+      orderNode({
+        id: "801",
+        createdAt: "2026-09-07T12:00:00Z",
+        customerId: "801",
+        attrs: metaAttrs,
+      }),
+    ],
+    ledgerByOrderId: new Map([
+      ["801", econ("801", { rev: 2000, cogs: 800 })],
+    ]),
+    period: { since: "2026-09-06", until: "2026-09-10" },
+    history: { since: "2026-09-06", until: "2026-09-10" },
+    meta_spend_total: 1000,
+    capture_started_at: "2026-09-06",
+    attribution_coverage_pct: 60,
+  });
+  assert.strictEqual(
+    report.customers[0].first_order_attribution_phase,
+    "post_capture"
+  );
+  assert.strictEqual(report.observed_cac.post_capture_meta_new_customers, 1);
+  assert.strictEqual(
+    report.observed_cac.first_party_observed_new_customer_cac,
+    1000
+  );
+  assert.ok(report.observed_cac.observed_gp_cac_ratio != null);
+});
+
+test("organic/unattributed excluded from FP CAC", () => {
+  const report = buildCustomerEconomics({
+    orders: [
+      orderNode({
+        id: "901",
+        createdAt: "2026-09-07T12:00:00Z",
+        customerId: "901",
+      }),
+    ],
+    ledgerByOrderId: new Map([["901", econ("901")]]),
+    period: { since: "2026-09-06", until: "2026-09-10" },
+    meta_spend_total: 2000,
+    capture_started_at: "2026-09-06",
+    attribution_coverage_pct: 50,
+  });
+  assert.notStrictEqual(report.customers[0].first_order_acquisition, "Meta");
+  assert.strictEqual(report.observed_cac.first_party_observed_new_customer_cac, null);
+  assert.strictEqual(report.observed_cac.post_capture_meta_new_customers, 0);
+});
+
+test("zero eligible => CAC null", () => {
+  const cac = buildObservedCac({
+    customers: [
+      {
+        identified: true,
+        first_order_date: "2026-08-05",
+        first_order_acquisition: "Meta",
+        first_order_attribution_phase: "pre_capture",
+        lifetime_gp: 600,
+        lifetime_recognized_revenue: 1500,
+        recognized_orders: 1,
+        first_order_gp: 600,
+      },
+    ],
+    periodSince: "2026-08-01",
+    periodUntil: "2026-08-31",
+    metaSpendTotal: 2000,
+    attributionCoveragePct: 50,
+  });
+  assert.strictEqual(cac.meta_new_customers, 0);
+  assert.strictEqual(cac.first_party_observed_new_customer_cac, null);
+  assert.strictEqual(cac.observed_gp_cac_ratio, null);
+});
+
+test("low attribution coverage caps confidence", () => {
+  const customers = [];
+  for (let i = 0; i < 20; i += 1) {
+    customers.push({
+      identified: true,
+      first_order_date: "2026-09-07",
+      first_order_acquisition: "Meta",
+      first_order_attribution_phase: "post_capture",
+      lifetime_gp: 500,
+      lifetime_recognized_revenue: 1200,
+      recognized_orders: 1,
+      first_order_gp: 500,
+    });
+  }
+  const low = buildObservedCac({
+    customers,
+    periodSince: "2026-09-06",
+    periodUntil: "2026-09-10",
+    metaSpendTotal: 10000,
+    attributionCoveragePct: 10,
+  });
+  assert.strictEqual(low.meta_new_customers, 20);
+  assert.strictEqual(low.confidence, "low");
+
+  const missing = buildObservedCac({
+    customers,
+    periodSince: "2026-09-06",
+    periodUntil: "2026-09-10",
+    metaSpendTotal: 10000,
+    attributionCoveragePct: null,
+  });
+  assert.ok(["low", "insufficient"].includes(missing.confidence));
+  assert.strictEqual(missing.attribution_coverage_pct, null);
+});
+
+test("CAC denominator = post_capture Meta new only", () => {
   const customers = [
     {
       identified: true,
       first_order_date: "2026-08-05",
       first_order_acquisition: "Meta",
+      first_order_attribution_phase: "post_capture",
       lifetime_gp: 600,
       lifetime_recognized_revenue: 1500,
       recognized_orders: 1,
@@ -318,6 +510,7 @@ test("CAC denominator = Meta new customers only", () => {
       identified: true,
       first_order_date: "2026-08-06",
       first_order_acquisition: "organic",
+      first_order_attribution_phase: "post_capture",
       lifetime_gp: 400,
       lifetime_recognized_revenue: 900,
       recognized_orders: 1,
@@ -325,11 +518,12 @@ test("CAC denominator = Meta new customers only", () => {
     },
     {
       identified: true,
-      first_order_date: "2026-07-01",
+      first_order_date: "2026-08-07",
       first_order_acquisition: "Meta",
+      first_order_attribution_phase: "pre_capture",
       lifetime_gp: 800,
       lifetime_recognized_revenue: 2000,
-      recognized_orders: 2,
+      recognized_orders: 1,
       first_order_gp: 500,
     },
   ];
@@ -338,10 +532,55 @@ test("CAC denominator = Meta new customers only", () => {
     periodSince: "2026-08-01",
     periodUntil: "2026-08-31",
     metaSpendTotal: 2000,
+    attributionCoveragePct: 55,
   });
   assert.strictEqual(cac.meta_new_customers, 1);
+  assert.strictEqual(cac.pre_capture_meta_new_customers_excluded, 1);
   assert.strictEqual(cac.first_party_observed_new_customer_cac, 2000);
   assert.strictEqual(cac.observed_gp_cac_ratio, round2ish(600 / 2000));
+});
+
+test("history join coverage + incomplete warning", () => {
+  const ledger = new Map([
+    ["501", econ("501")],
+    ["502", econ("502")],
+    ["999", econ("999")], // missing from GraphQL — no fabricated identity
+  ]);
+  const report = buildCustomerEconomics({
+    orders: [
+      orderNode({
+        id: "501",
+        createdAt: "2026-08-01",
+        customerId: "90",
+      }),
+      orderNode({
+        id: "502",
+        createdAt: "2026-08-10",
+        customerId: "90",
+      }),
+    ],
+    ledgerByOrderId: ledger,
+    period: { since: "2026-08-01", until: "2026-08-31" },
+    history: { since: "2026-03-01", until: "2026-08-31" },
+    attribution_coverage_pct: 40,
+  });
+  assert.strictEqual(report.history.history_since, "2026-03-01");
+  assert.ok(report.history.history_days > 0);
+  assert.strictEqual(report.summary.joined_recognized_shopify_orders, 2);
+  assert.strictEqual(report.summary.ledger_recognized_shopify_orders, 3);
+  assert.strictEqual(
+    report.summary.recognized_orders_missing_shopify_match_count,
+    1
+  );
+  assert.strictEqual(report.summary.history_join_coverage_pct, round2ish((2 / 3) * 100));
+  assert.strictEqual(report.summary.history_incomplete, true);
+  assert.ok(
+    report.data_quality.warnings.some((w) => w.startsWith("history_incomplete"))
+  );
+  // missing order must not invent a customer
+  assert.ok(
+    !report.customers.some((c) => String(c.customer_key).includes("999"))
+  );
 });
 
 function round2ish(n) {
