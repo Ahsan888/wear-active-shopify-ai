@@ -127,6 +127,98 @@ function plRow(label, value, { bold = false, tipText = null } = {}) {
   </tr>`;
 }
 
+const ACTION_LABELS = {
+  PAUSE: "Pause",
+  REDUCE: "Reduce",
+  HOLD: "Hold",
+  SCALE: "Scale",
+  CREATIVE_TEST: "Creative test",
+  PROMOTION_TEST: "Promotion test",
+  INSUFFICIENT_DATA: "Insufficient data",
+  MONITOR: "Hold",
+};
+
+const REASON_LABELS = {
+  ZERO_PURCHASE_SPEND: "Spent enough for a normal purchase but generated none.",
+  CPA_ABOVE_ACCOUNT: "Cost per purchase is materially worse than the account average.",
+  HIGH_CPA: "Cost per purchase is too high for the current evidence.",
+  ATTRIBUTION_IMMATURE: "First-party tracking is still new, so Meta results are not independently verified yet.",
+  META_NOT_FP_VERIFIED: "Meta results are not yet independently verified by first-party tracking.",
+  BUSINESS_PROFITABLE: "The overall business remains profitable.",
+  LARGE_AD_SAFETY_MARGIN: "Current ad spend is comfortably within the business safety limit.",
+  CLEARANCE_INVENTORY: "Mature inventory is tying up capital and has room for a safe promotion test.",
+  HOLD_NEUTRAL: "There is no account-wide reason to change spend right now.",
+  INSUFFICIENT_EVIDENCE: "There is not enough evidence to recommend a change yet.",
+  WEAK_FUNNEL: "The journey from click to purchase is weaker than normal.",
+};
+
+function actionLabel(action) {
+  const key = String(action || "INSUFFICIENT_DATA").toUpperCase();
+  return ACTION_LABELS[key] || prettyStatus(key).toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function actionTone(action) {
+  const key = String(action || "").toUpperCase();
+  if (key === "PAUSE") return "bad";
+  if (key === "REDUCE") return "warn";
+  if (key === "SCALE") return "ok";
+  if (key === "CREATIVE_TEST") return "info";
+  if (key === "PROMOTION_TEST") return "accent";
+  if (key === "INSUFFICIENT_DATA") return "muted";
+  return "neutral";
+}
+
+function friendlyReason(item = {}) {
+  const codes = item.reason_codes || [];
+  const reasonPriority = [
+    "ZERO_PURCHASE_SPEND",
+    "CPA_ABOVE_ACCOUNT",
+    "HIGH_CPA",
+    "WEAK_FUNNEL",
+    "CLEARANCE_INVENTORY",
+    "ATTRIBUTION_IMMATURE",
+    "INSUFFICIENT_EVIDENCE",
+    "LARGE_AD_SAFETY_MARGIN",
+    "BUSINESS_PROFITABLE",
+    "HOLD_NEUTRAL",
+  ];
+  const priorityCode = reasonPriority.find((code) => codes.includes(code));
+  if (priorityCode) return REASON_LABELS[priorityCode];
+  if (item.reason && !/\b[A-Z][A-Z0-9_]{3,}\b/.test(item.reason)) return item.reason;
+  return "Review the current evidence before changing this item.";
+}
+
+function reasonDetails(item = {}) {
+  const codes = item.reason_codes || [];
+  return codes.length
+    ? `<details class="reason-details"><summary>Technical details</summary><code>${escapeHtml(codes.join(", "))}</code></details>`
+    : "";
+}
+
+function qualityStatus(dataQuality = {}) {
+  const critical = dataQuality.blockers || [];
+  const warnings = dataQuality.warnings || [];
+  if (critical.length) return { label: "Important issue", tone: "bad" };
+  if (warnings.length) return { label: "Limited", tone: "warn" };
+  return { label: "Good", tone: "ok" };
+}
+
+function dataQualityLine(dataQuality) {
+  const q = qualityStatus(dataQuality || {});
+  return `<p class="quality-line">Data quality: <span class="pill tone-${q.tone}">${q.label}</span></p>`;
+}
+
+function accountPosture(recommendation) {
+  const key = String(recommendation || "HOLD_SPEND").toUpperCase();
+  const map = {
+    HOLD_SPEND: ["Hold spend", "Overall ad spend is still affordable. Keep the account steady and act on weak ads individually."],
+    SCALE_CAUTIOUSLY: ["Scale cautiously", "The account can support controlled growth, but increase only proven winners and review results frequently."],
+    REDUCE_SPEND: ["Reduce spend", "Advertising is putting pressure on profit. Reduce weak areas first instead of making an indiscriminate cut."],
+    DEFENSIVE_MODE: ["Defensive mode", "Protect cash and profitability now. Pause the weakest activity and avoid expansion until evidence improves."],
+  };
+  return map[key] || [prettyStatus(key), "Keep spend steady and use the ranked action queue for individual changes."];
+}
+
 function buildCtx(report) {
   const cur = report.meta?.account?.currency || "PKR";
   return {
@@ -261,34 +353,36 @@ function renderTrendsSection(operational, cur) {
 }
 
 function renderOverview(ctx) {
-  const { cur, bh, bas, me, books, p, sc, mix, fb, totals, conc, recBuckets, contribTone } =
-    ctx;
-
-  const salesRows = mix
-    .map(
-      (c) => `<tr>
-      <td>${escapeHtml(c.channel)}</td>
-      <td>${num(c.orders, 0)}</td>
-      <td>${pct(c.order_share_pct)}</td>
-      <td title="${escapeHtml(`Gross ${money(c.revenue_ex_tax, cur)} − refunds ${money(c.refunds || 0, cur)}`)}">${money(c.net_revenue_ex_tax != null ? c.net_revenue_ex_tax : c.revenue_ex_tax, cur)}</td>
-      <td>${pct(c.net_revenue_share_pct != null ? c.net_revenue_share_pct : c.revenue_share_pct)}</td>
-    </tr>`
-    )
-    .join("");
-
-  const concBlock = conc.non_shopify_distortion_risk
-    ? `<section class="section-context">
-    <h2>Business Mix Context</h2>
-    <p><strong>${escapeHtml(conc.dominant_channel)}</strong> contributed <strong>${pct(conc.dominant_channel_revenue_share_pct)}</strong> of recognized revenue in this period.</p>
-    <p class="note">${escapeHtml(conc.warning || "")}</p>
-  </section>`
-    : conc.is_materially_concentrated
-      ? `<section class="section-context">
-    <h2>Revenue Concentration</h2>
-    <p><strong>${escapeHtml(conc.dominant_channel)}</strong> contributed <strong>${pct(conc.dominant_channel_revenue_share_pct)}</strong> of net revenue.</p>
-    ${conc.warning ? `<p class="note">${escapeHtml(conc.warning)}</p>` : ""}
-  </section>`
-      : "";
+  const { cur, bh, bas, books, p, sc, totals, conc } = ctx;
+  const md = ctx.report.marketing_decisions || {};
+  const inv = ctx.report.inventory?.summary || {};
+  const profitable = Number(p.meta_adjusted_profit) >= 0;
+  const affordable = !["above_break_even", "unprofitable"].includes(bas.status);
+  const shopifyHealthy = Number(sc.contribution_after_meta) >= 0;
+  const inventoryRisk = Number(inv.capital_at_risk_pct || 0) >= 50;
+  const urgent = (md.owner_action_queue || []).some((a) => a.priority === "P1" || a.primary_action === "PAUSE");
+  const summary = `Business is ${profitable ? "profitable" : "not profitable"} and advertising is ${affordable ? "affordable" : "above its safe level"}, but Shopify acquisition is ${shopifyHealthy ? "contributing positively" : "weak"}${inventoryRisk ? " and excess inventory remains high" : ""}.${urgent ? " There are urgent actions to review today." : " No urgent account-wide change is needed today."}`;
+  const marketingActions = md.owner_action_queue || [];
+  const generalActions = ctx.report.recommendations || [];
+  const topActions = [
+    ...marketingActions.map((a) => ({ ...a, source: "Marketing" })),
+    ...generalActions.map((a) => ({
+      priority: a.priority === "critical" ? "P1" : a.priority === "high" ? "P2" : a.priority === "medium" ? "P3" : "P4",
+      primary_action: a.action,
+      entity_name: a.entity_name || a.area,
+      reason: a.reason,
+      confidence: a.confidence,
+      reason_codes: a.reason_code ? [a.reason_code] : [],
+      source: "Operations",
+    })),
+  ].sort((a, b) => String(a.priority || "P4").localeCompare(String(b.priority || "P4"))).slice(0, 5);
+  const actionRows = topActions.map((a) => `<tr>
+    <td><span class="priority priority-${escapeHtml(a.priority || "P4")}">${escapeHtml(a.priority || "P4")}</span></td>
+    <td><span class="action action-${actionTone(a.primary_action)}">${escapeHtml(actionLabel(a.primary_action))}</span></td>
+    <td>${escapeHtml(a.entity_name || "Business")}</td>
+    <td>${escapeHtml(friendlyReason(a))}</td>
+    <td>${escapeHtml(a.source || "Operations")}</td>
+  </tr>`).join("");
 
   return `<div id="view-overview" class="view active">
   ${
@@ -296,93 +390,74 @@ function renderOverview(ctx) {
       ? `<p class="note tone-warn">Today's Meta and order activity may still be incomplete.</p>`
       : ""
   }
+  <section class="hero-section">
+    <div class="eyebrow">What you need to know</div>
+    <h2>Business at a glance</h2>
+    <p class="executive-verdict">${escapeHtml(summary)}</p>
+    <div class="grid key-grid">
+      ${card("Net profit", money(p.meta_adjusted_profit, cur), "After actual Meta spend", profitable ? "ok" : "bad", TIPS.meta_adjusted_profit)}
+      ${card("Can we afford current ad spend?", affordable ? "Yes" : "No", `${pct(bas.business_cpa_headroom_pct)} headroom`, affordable ? "ok" : "bad", TIPS.affordability)}
+      ${card("Shopify contribution after Meta", money(sc.contribution_after_meta, cur), shopifyHealthy ? "Shopify is contributing" : "Shopify acquisition needs attention", shopifyHealthy ? "ok" : "warn", TIPS.shopify_contribution)}
+      ${card("Inventory capital at risk", money(inv.capital_at_risk_value, cur), inv.capital_at_risk_pct == null ? "Inventory data unavailable" : pct(inv.capital_at_risk_pct), inventoryRisk ? "warn" : "neutral")}
+      ${card("Urgent today", urgent ? "Yes" : "No", urgent ? "Review the first action below" : "No P1 actions", urgent ? "bad" : "ok")}
+    </div>
+  </section>
   <section>
-    <div class="divider-label">Whole Business · Recognized Actuals</div>
-    <h2>Business Health</h2>
-    <p class="note">The top-line financial position across every recognized sales channel for this reporting period.</p>
+    <div class="eyebrow">What needs action</div>
+    <h2>Top 5 actions</h2>
+    <p class="note">The highest-priority operational, marketing, pricing, and inventory guidance available in this report.</p>
+    <div class="table-wrap"><table class="action-table">
+      <thead><tr><th>Priority</th><th>Action</th><th>Item</th><th>Why</th><th>Area</th></tr></thead>
+      <tbody>${actionRows || `<tr><td colspan="5" class="empty-state">Nothing urgent needs action right now.</td></tr>`}</tbody>
+    </table></div>
+  </section>
+  <section>
+    <div class="eyebrow">Supporting detail</div>
+    <h2>Key supporting numbers</h2>
     <div class="grid">
-      ${card("Health status", `<span class="pill tone-${statusClass(bh.status)}">${escapeHtml(prettyStatus(bh.status))}</span>`, escapeHtml(bh.reason || ""), statusClass(bh.status))}
-      ${card("Meta-adjusted profit", money(p.meta_adjusted_profit, cur), "Profit after actual Meta spend", statusClass(bh.status), TIPS.meta_adjusted_profit)}
-      ${card("Meta-adjusted margin", pct(p.meta_adjusted_margin_pct))}
       ${card("Net recognized revenue", money(books.net_revenue_ex_tax, cur))}
-      ${card("Gross margin", pct(books.gross_margin_pct))}
+      ${card("Gross margin", pct(books.gross_margin_pct), "Revenue left after product cost, before operating expenses.", "neutral", TIPS.gross_margin)}
       ${card("Recognized orders", num(books.recognized_orders, 0))}
+      ${card("Meta spend", money(totals.spend, cur))}
+      ${card("Meta-reported cost per purchase", money(totals.cpa, cur), "Reported by Meta", "neutral", TIPS.meta_cpa)}
+      ${card("Maximum ad cost per sale", money(p.break_even_cpa, cur), "Before profit is exhausted", "neutral", TIPS.break_even_cpa)}
     </div>
+    ${conc.non_shopify_distortion_risk ? `<p class="callout warning"><strong>Business Mix Context:</strong> ${escapeHtml(conc.warning || "Business profitability is mostly coming from non-Shopify sales.")}</p>` : ""}
   </section>
-
-  <section>
-    <div class="divider-label">Whole Business · Spend Capacity</div>
-    <h2>Business Ad-Spend Affordability ${tip(TIPS.affordability)}</h2>
-    <p class="note">Whole-business view. Manual and Other Sales contribute to the economics. Not ecommerce acquisition efficiency.</p>
-    <div class="grid">
-      ${card("Status", `<span class="pill tone-${statusClass(bas.status)}">${escapeHtml(prettyStatus(bas.status))}</span>`, "", statusClass(bas.status))}
-      ${card("Meta spend", money(bas.meta_spend, cur))}
-      ${card("Business-wide ad load / order", money(bas.business_wide_ad_load_per_recognized_order ?? bas.blended_ad_cost_per_recognized_order, cur), "", "neutral", TIPS.business_wide_ad_load)}
-      ${card("Business break-even CPA", money(bas.break_even_cpa, cur), "", "neutral", TIPS.break_even_cpa)}
-      ${card("Headroom", `${money(bas.business_cpa_headroom, cur)} (${pct(bas.business_cpa_headroom_pct)})`)}
-      ${card("Ad-spend utilization", pct(bas.ad_spend_utilization_pct))}
-    </div>
-  </section>
-
-  <section class="section-shopify">
-    <div class="divider-label">Shopify / Ecommerce Context</div>
-    <h2>Shopify Contribution ${tip(TIPS.shopify_contribution)}</h2>
-    <div class="badge-row" style="margin-bottom:12px">
-      <span class="badge">DATE-ALIGNED · NOT ATTRIBUTED</span>
-      <span class="badge">Shared opex not allocated</span>
-      <span class="pill tone-${contribTone}">${escapeHtml(prettyStatus(sc.contribution_status || "—"))}</span>
-    </div>
-    <div class="grid">
-      ${card("Shopify orders", num(sc.recognized_orders, 0))}
-      ${card("Shopify gross revenue", money(sc.revenue_ex_tax, cur))}
-      ${card("Shopify refunds", money(sc.refunds ?? 0, cur))}
-      ${card("Shopify net revenue", money(sc.net_revenue_ex_tax, cur), "", "neutral", TIPS.shopify_net_revenue)}
-      ${card("Shopify COGS", money(sc.cogs, cur))}
-      ${card("Shopify ad load / order", money(sc.ad_load_per_recognized_order ?? sc.shopify_ad_load_per_recognized_order, cur), "", "neutral", TIPS.shopify_ad_load)}
-      ${card("Contribution after Meta", money(sc.contribution_after_meta, cur), escapeHtml(sc.contribution_status_reason || ""), contribTone)}
-    </div>
-    <p class="note">${escapeHtml(sc.note || "Meta spend is compared with Shopify channel economics for the same date range. This does not mean every Shopify order came from Meta, and no shared operating expenses are allocated here.")}</p>
-  </section>
-
-  <section>
-    <div class="divider-label">Meta · Attributed Performance</div>
-    <h2>Meta Attributed Efficiency</h2>
-    <p class="note">Meta-attributed metrics use Meta's own attribution and are not the same as total business CAC.</p>
-    <div class="grid">
-      ${card("Meta spend", money(me.meta_spend ?? totals.spend, cur))}
-      ${card("Meta purchases", num(me.meta_attributed_purchases ?? totals.purchases, 0))}
-      ${card("Meta CPA", money(me.meta_attributed_cpa, cur), "", "neutral", TIPS.meta_cpa)}
-      ${card("Meta ROAS", roas(me.meta_attributed_roas), "", "neutral", TIPS.meta_roas)}
-      ${card("Impressions", num(totals.impressions, 0))}
-      ${card("CTR", pct(totals.ctr ?? fb.ctr))}
-    </div>
-  </section>
-
-  <section>
-    <h2>Sales Mix</h2>
-    <p class="note">Recognized orders and net revenue split by source, with whole-business totals for context.</p>
-    <table class="mix-table">
-      <thead><tr><th>Channel</th><th>Orders</th><th>Order Share</th><th>Net Revenue</th><th>Net Share</th></tr></thead>
-      <tbody>
-        ${salesRows || `<tr><td colspan="5" class="empty">No channel data.</td></tr>`}
-        <tr><td><strong>Total</strong></td><td><strong>${num(books.recognized_orders, 0)}</strong></td><td>100%</td><td><strong>${money(books.net_revenue_ex_tax ?? ctx.report.sales_mix?.totals?.net_revenue_ex_tax, cur)}</strong></td><td>100%</td></tr>
-      </tbody>
-    </table>
-  </section>
-
-  ${concBlock}
-
-  ${renderTrendsSection(ctx.operational, cur)}
-  ${renderDailyAlertsSection(ctx.operational)}
-
-  <section>
-    <h2>Top Actions</h2>
-    <p class="note">Prioritized advisory actions generated from the current reporting evidence.</p>
-    <div class="grid-2">
-      <div><h3>High</h3>${renderRecList([...(recBuckets.critical || []), ...(recBuckets.high || [])])}</div>
-      <div><h3>Medium</h3>${renderRecList(recBuckets.medium || [])}</div>
-      <div><h3>Low</h3>${renderRecList(recBuckets.low || [])}</div>
-    </div>
+  <details class="secondary-section">
+    <summary>Business, Shopify, and sales mix context</summary>
+    <section>
+      <h2>Business Health</h2>
+      <p><span class="pill tone-${statusClass(bh.status)}">${escapeHtml(prettyStatus(bh.status))}</span> ${escapeHtml(bh.reason || "")}</p>
+      <h3>Business Ad-Spend Affordability ${tip(TIPS.affordability)}</h3>
+      <p><span class="pill tone-${statusClass(bas.status)}">${escapeHtml(prettyStatus(bas.status))}</span></p>
+    </section>
+    <section class="section-shopify">
+      <div class="divider-label">Shopify / Ecommerce Context</div>
+      <h2>Contribution after Meta</h2>
+      <p><span class="pill tone-${statusClass(sc.contribution_status)}">${escapeHtml(prettyStatus(sc.contribution_status))}</span></p>
+      <div class="grid">
+        ${card("Shopify net revenue", money(sc.net_revenue_ex_tax, cur))}
+        ${card("Shopify refunds", money(sc.refunds, cur))}
+        ${card("Shopify COGS", money(sc.cogs, cur))}
+        ${card("Shopify ad load", money(sc.ad_load_per_recognized_order ?? sc.shopify_ad_load_per_recognized_order, cur), "DATE-ALIGNED · NOT ATTRIBUTED", "neutral", TIPS.shopify_ad_load)}
+      </div>
+    </section>
+    <section>
+      <h2>Sales Mix</h2>
+      <table><thead><tr><th>Channel</th><th>Orders</th><th>Net Revenue</th></tr></thead><tbody>${ctx.mix.map((c) => `<tr><td>${escapeHtml(c.channel)}</td><td>${num(c.orders, 0)}</td><td>${money(c.net_revenue_ex_tax ?? c.revenue_ex_tax, cur)}</td></tr>`).join("") || `<tr><td colspan="3" class="empty-state">No channel data.</td></tr>`}</tbody></table>
+      <p class="note">Meta CPA ${tip(TIPS.meta_cpa)} and Meta ROAS ${tip(TIPS.meta_roas)} are Meta-reported and remain separate from Shopify economics.</p>
+    </section>
+  </details>
+  <details class="secondary-section">
+    <summary>Trends and daily alerts</summary>
+    ${renderTrendsSection(ctx.operational, cur)}
+    ${renderDailyAlertsSection(ctx.operational)}
+  </details>
+  <section class="quality-section">
+    <div class="eyebrow">Data quality and caveats</div>
+    ${dataQualityLine(ctx.report.data_quality)}
+    <p class="note">Detailed diagnostics are available in the Data Quality tab.</p>
   </section>
 </div>`;
 }
@@ -427,11 +502,27 @@ function renderProfitability(ctx) {
         .join("")
     : `<tr><td colspan="2" class="empty">No expense breakdown available.</td></tr>`;
 
+  const currentAdCost = ctx.bas.business_wide_ad_load_per_recognized_order ?? ctx.bas.blended_ad_cost_per_recognized_order;
+  const belowBreakEven = Number(currentAdCost) <= Number(p.break_even_cpa);
+
   return `<div id="view-profitability" class="view">
   ${partialNote}
+  <section class="hero-section">
+    <div class="eyebrow">What you need to know</div>
+    <h2>Profit position</h2>
+    <p class="executive-verdict">${belowBreakEven ? "Current advertising is comfortably below the business break-even level." : "Current advertising costs more per recognized sale than the business can safely absorb."}</p>
+    <div class="grid key-grid">
+      ${card("Net profit", money(books.books_net_profit, cur), "Books result", statusClass(ctx.bh.status), TIPS.books_net_profit)}
+      ${card("Profit before ads", money(p.profit_before_ads, cur))}
+      ${card("Meta spend", money(recon.meta_spend ?? ctx.totals.spend, cur))}
+      ${card("Meta-adjusted profit", money(p.meta_adjusted_profit, cur), "Books ads replaced with actual Meta spend", statusClass(ctx.bh.status), TIPS.meta_adjusted_profit)}
+      ${card("Maximum ad cost per sale", money(p.break_even_cpa, cur), "Before profit is exhausted", "neutral", TIPS.break_even_cpa)}
+      ${card("Ad spend per recognized sale", money(currentAdCost, cur), "Across all recognized sales", belowBreakEven ? "ok" : "bad", TIPS.business_wide_ad_load)}
+    </div>
+  </section>
   <section>
-    <div class="divider-label">Whole Business · Accounting</div>
-    <h2>P&amp;L — Books Recognized Actuals</h2>
+    <div class="eyebrow">Supporting detail</div>
+    <h2>Accounting detail</h2>
     <p class="note">Ledger-recognized revenue, direct costs, operating expenses, and booked profit for the selected period.</p>
     <table class="pl-table">
       <tbody>${plRows}</tbody>
@@ -536,9 +627,22 @@ function renderSales(ctx) {
     : "";
 
   return `<div id="view-sales" class="view">
+  <section class="hero-section">
+    <div class="eyebrow">What you need to know</div>
+    <h2>Who is driving revenue?</h2>
+    <div class="grid key-grid">
+      ${CHANNEL_ORDER.map((name) => {
+        const c = sbc[name] || {};
+        return card(name, money(c.net_revenue_ex_tax ?? c.revenue_ex_tax, cur), `${num(c.orders, 0)} recognized orders`);
+      }).join("")}
+      ${card("Shopify GP before ads", money(sc.gross_profit_before_ads, cur))}
+      ${card("Shopify contribution after Meta", money(sc.contribution_after_meta, cur), "After date-aligned Meta spend", statusClass(sc.contribution_status), TIPS.shopify_contribution)}
+    </div>
+    ${conc.non_shopify_distortion_risk ? `<p class="callout warning"><strong>Attention:</strong> Business profitability is mostly coming from non-Shopify sales, so it does not represent ecommerce performance on its own.</p>` : ""}
+  </section>
   <section>
-    <div class="divider-label">Whole Business · Channel View</div>
-    <h2>Sales by Channel</h2>
+    <div class="eyebrow">Supporting detail</div>
+    <h2>Channel economics</h2>
     <p class="note">Recognized paid-sales economics by channel. Gift/PR COGS is excluded here; official Books COGS (including Gift/PR) is on Profitability.</p>
     <table class="sales-table">
       <thead><tr>
@@ -590,6 +694,9 @@ function renderProducts(ctx) {
   const { cur, report } = ctx;
   const groups = resolveProductGroups(report);
   const hasIncomplete = groups.some((g) => g.incomplete_cogs_coverage);
+  const opportunityCount = groups.filter((g) => OPPORTUNITY_STATUSES.includes(g.status)).length;
+  const riskCount = groups.filter((g) => RISK_STATUSES.includes(g.status)).length;
+  const issueCount = groups.filter((g) => g.status === "data_issue").length;
   const incompleteBanner = hasIncomplete
     ? `<p class="note tone-warn"><strong>Incomplete COGS coverage</strong> — aggregate margins may not be authoritative where Ledger COGS is missing.</p>`
     : "";
@@ -635,9 +742,20 @@ function renderProducts(ctx) {
     : `<p class="empty">No product rows in range.</p>`;
 
   return `<div id="view-products" class="view">
-  <section>
+  <section class="hero-section">
+    <div class="eyebrow">What you need to know</div>
     <h2>Product Portfolio</h2>
     <p class="note">Ledger product economics only — no Meta allocation or product-level ROAS.</p>
+    <div class="grid key-grid">
+      ${card("Products reviewed", num(groups.length, 0))}
+      ${card("Opportunities", num(opportunityCount, 0), "Healthy or high-potential products", opportunityCount ? "ok" : "neutral")}
+      ${card("Margin risks", num(riskCount, 0), "Products needing commercial review", riskCount ? "warn" : "neutral")}
+      ${card("Data issues", num(issueCount, 0), "Fix these before trusting margin conclusions", issueCount ? "bad" : "ok")}
+    </div>
+  </section>
+  <section>
+    <div class="eyebrow">What needs action</div>
+    <h2>Product detail</h2>
     ${incompleteBanner}
     <div class="filter-bar" id="product-filters">
       <button type="button" class="filter-btn active" data-pf="all">All</button>
@@ -675,21 +793,22 @@ function renderAdvertising(ctx) {
     .join("");
 
   return `<div id="view-advertising" class="view">
-  <section>
-    <div class="divider-label">Meta · Account Level</div>
-    <h2>Account Summary</h2>
+  <section class="hero-section">
+    <div class="eyebrow">What you need to know · Meta-reported</div>
+    <h2>Account performance</h2>
     <p class="note">Meta-attributed delivery and conversion efficiency for the selected reporting period.</p>
     <div class="grid">
       ${card("Spend", money(totals.spend, cur))}
-      ${card("Purchases", num(totals.purchases, 0))}
-      ${card("Meta CPA", money(totals.cpa, cur), "", "neutral", TIPS.meta_cpa)}
-      ${card("Meta ROAS", roas(totals.roas), "", "neutral", TIPS.meta_roas)}
+      ${card("Meta-reported purchases", num(totals.purchases, 0))}
+      ${card("Meta-reported cost per purchase", money(totals.cpa, cur), "", "neutral", TIPS.meta_cpa)}
+      ${card("Meta-reported ROAS", roas(totals.roas), "", "neutral", TIPS.meta_roas)}
       ${card("CTR", pct(totals.ctr ?? fb.ctr))}
       ${card("CPM", money(totals.cpm, cur))}
     </div>
   </section>
 
   <section>
+    <div class="eyebrow">Supporting detail</div>
     <h2>Account Funnel</h2>
     <p class="note">Volume progression from ad delivery through Meta-attributed purchase.</p>
     <div class="funnel">${funnelHtml}</div>
@@ -701,6 +820,7 @@ function renderAdvertising(ctx) {
   </section>
 
   <section>
+    <div class="eyebrow">What needs action</div>
     <h2>Campaigns</h2>
     <p class="note">Use the evidence filters to isolate delivery risks and controlled growth candidates.</p>
     <div class="filter-bar" id="ad-filters">
@@ -1202,29 +1322,21 @@ function renderInventory(ctx) {
     .join("");
 
   return `<div id="view-inventory" class="view">
-  <section>
-    <div class="divider-label">INVENTORY &amp; DEMAND INTELLIGENCE</div>
-    <h2>Inventory Overview</h2>
-    <p class="note">Shopify sellable stock × Variant Master cost; demand from recognized Ledger sales (gift/PR excluded). Headline units are SKU-addressable trusted only. Advisory only — no inventory mutations or POs.</p>
-    <div class="grid">
-      ${card("SKU-addressable units", num(s.total_units, 0), escapeHtml(s.total_units_scope || "Trusted SKUs only"))}
-      ${card("Unkeyed units", num(s.unkeyed_inventory_units, 0), `bundle/set≈${num(s.unkeyed_likely_bundle_set_units, 0)}`)}
-      ${card("Safe Shopify total", num(s.total_shopify_inventory_units_if_safe, 0), "addressable + unkeyed; excl duplicate SKUs")}
-      ${card("Inventory value", money(s.total_inventory_value), `excl missing-cost + duplicate SKUs`)}
-      ${card("No-recent-demand value", money(s.no_recent_demand_value), "30d soft — not in capital at risk")}
-      ${card("Dead inventory (90d)", money(s.dead_inventory_value))}
-      ${card("Overstock value", money(s.overstock_value))}
-      ${card("Capital at risk", s.capital_at_risk_pct == null ? "—" : pct(s.capital_at_risk_pct), money(s.capital_at_risk_value))}
-      ${card("Critical", num(s.critical_sku_count, 0), "", "bad")}
-      ${card("Low stock", num(s.low_sku_count, 0), "", "warn")}
-      ${card("Overstock SKUs", num(s.overstock_sku_count, 0))}
-      ${card("No demand 90d", num(s.no_demand_sku_count, 0))}
-      ${card("No recent 30d", num(s.no_recent_demand_sku_count, 0))}
-      ${card("Missing-SKU variants", num(s.missing_sku_variant_count, 0))}
-      ${card("Duplicate SKU variants", num(s.duplicate_sku_variant_count, 0), `excl ${num(s.duplicate_sku_units_excluded, 0)} units`)}
+  <section class="hero-section">
+    <div class="eyebrow">What you need to know</div>
+    <h2>Inventory position</h2>
+    <p class="executive-verdict">${Number(s.capital_at_risk_pct || 0) >= 50 ? "Too much inventory capital is tied up in dead stock and overstock." : "Inventory capital at risk is currently contained."}</p>
+    <div class="grid key-grid">
+      ${card("Total stock", num(s.total_shopify_inventory_units_if_safe ?? s.total_units, 0), "Sellable units where safe to count")}
+      ${card("Capital tied up", money(s.total_inventory_value), "At product cost")}
+      ${card("Dead stock · 90d", money(s.dead_inventory_value), `${num(s.no_demand_sku_count, 0)} SKUs with no demand`, "bad")}
+      ${card("Overstock", money(s.overstock_value), `${num(s.overstock_sku_count, 0)} SKUs`, "warn")}
+      ${card("Low / critical stock", `${num(s.low_sku_count, 0)} / ${num(s.critical_sku_count, 0)}`, "Low / critical SKUs", Number(s.critical_sku_count) ? "bad" : "warn")}
     </div>
+    <p class="callout neutral"><strong>Watch, not dead:</strong> ${money(s.no_recent_demand_value)} has no recent demand over 30 days. The 90-day dead-stock figure above is the more serious signal.</p>
   </section>
   <section>
+    <div class="eyebrow">What needs action · Restock risk</div>
     <h2>Restock Priorities</h2>
     <table>${th}<tbody>${invSkuRows((inv.restock_priorities || []).slice(0, 20))}</tbody></table>
   </section>
@@ -1233,7 +1345,8 @@ function renderInventory(ctx) {
     <table>${th}<tbody>${invSkuRows((inv.stockout_risks || []).slice(0, 20))}</tbody></table>
   </section>
   <section>
-    <h2>Overstock / Dead Stock</h2>
+    <div class="eyebrow">What needs action · Cash recovery</div>
+    <h2>Dead stock and overstock</h2>
     <table>${th}<tbody>${invSkuRows((inv.dead_slow_stock || []).slice(0, 20))}</tbody></table>
   </section>
   <section>
@@ -1256,6 +1369,7 @@ function renderInventory(ctx) {
   </section>
   <section>
     <h2>Data Quality</h2>
+    ${dataQualityLine(inv.data_quality)}
     <ul class="warn-list">${warnList || `<li class="empty">No inventory warnings.</li>`}</ul>
   </section>
 </div>`;
@@ -1353,24 +1467,16 @@ function renderCustomers(ctx) {
     .join("");
 
   return `<div id="view-customers" class="view">
-  <section>
-    <div class="divider-label">CUSTOMER &amp; COHORT ECONOMICS</div>
-    <h2>Customer Overview</h2>
+  <section class="hero-section">
+    <div class="eyebrow">What you need to know</div>
+    <h2>Customer overview</h2>
     <p class="note">Recognized Shopify + Ledger economics. New/Returning = within loaded history only (not proven lifetime-first). Identity via Shopify customer ID (email hashed only if needed). Confidence: <strong>${escapeHtml(cust.confidence || "—")}</strong>.</p>
     <div class="grid">
-      ${card("Identified customers", num(s.recognized_customers_identified, 0))}
-      ${card("New (observed hist.)", num(s.new_in_observed_history_customers ?? s.new_customers, 0))}
-      ${card("Returning (observed)", num(s.returning_in_observed_history_customers ?? s.returning_customers, 0))}
-      ${card("Guest/unknown", num(s.guest_unknown_customers, 0))}
-      ${card("History join coverage", s.history_join_coverage_pct == null ? "—" : pct(s.history_join_coverage_pct), `missing ${num(s.recognized_orders_missing_shopify_match_count, 0)}`)}
-      ${card("Orders", num(s.recognized_orders, 0))}
-      ${card("Revenue", money(s.revenue))}
-      ${card("GP", money(s.gross_profit))}
-      ${card("Rev/customer", money(s.revenue_per_identified_customer))}
-      ${card("GP/customer", money(s.gp_per_identified_customer))}
-      ${card("Repeat customer rate", s.repeat_customer_rate_pct == null ? "—" : pct(s.repeat_customer_rate_pct))}
-      ${card("Repeat order share", s.repeat_order_share_pct == null ? "—" : pct(s.repeat_order_share_pct))}
-      ${card("Guest order share", s.guest_order_share_pct == null ? "—" : pct(s.guest_order_share_pct))}
+      ${card("New customers", num(s.new_in_observed_history_customers ?? s.new_customers, 0), "Within loaded history")}
+      ${card("Returning customers", num(s.returning_in_observed_history_customers ?? s.returning_customers, 0), "Within loaded history")}
+      ${card("Repeat purchase rate", s.repeat_customer_rate_pct == null ? "Not enough data yet" : pct(s.repeat_customer_rate_pct))}
+      ${card("Average value per customer", money(s.revenue_per_identified_customer))}
+      ${card("Median days to second order", rp.median_days_to_second_order == null ? "Not enough data yet" : num(rp.median_days_to_second_order, 1))}
     </div>
   </section>
   ${bucketCards("New customer orders", nv.new_customer_orders)}
@@ -1415,17 +1521,14 @@ function renderCustomers(ctx) {
     </table>
   </section>
   <section>
-    <h2>Observed CAC</h2>
-    <p class="note">${escapeHtml(cac.label || "FIRST-PARTY OBSERVED NEW-CUSTOMER CAC")} · ${escapeHtml(cac.observed_gp_cac_label || "OBSERVED GP:CAC")} (post_capture Meta-new only; not LTV:CAC). Confidence: <strong>${escapeHtml(cac.confidence || "—")}</strong>.</p>
+    <h2>First-party customer acquisition cost</h2>
+    <p class="note">Sales we can directly connect to Meta. ${tip(TIPS.confidence)} Confidence: <strong>${escapeHtml(cac.confidence || "—")}</strong>.</p>
+    ${cac.first_party_observed_new_customer_cac == null ? `<p class="empty-state">Not enough post-tracking data yet. First-party attribution is still collecting data.</p>` : ""}
     <div class="grid">
       ${card("Meta spend", money(cac.meta_spend))}
-      ${card("Post-capture Meta-new", num(cac.post_capture_meta_new_customers ?? cac.meta_new_customers, 0))}
-      ${card("Pre-capture excluded", num(cac.pre_capture_meta_new_customers_excluded, 0))}
-      ${card("FP observed CAC", money(cac.first_party_observed_new_customer_cac))}
-      ${card("Obs. GP/customer", money(cac.observed_gp_per_customer))}
-      ${card("Observed GP:CAC", num(cac.observed_gp_cac_ratio, 2))}
-      ${card("Attr. coverage", cac.attribution_coverage_pct == null ? "—" : pct(cac.attribution_coverage_pct))}
-      ${card("Observed Rev:CAC", num(cac.observed_revenue_cac_ratio, 2))}
+      ${card("New customers linked to Meta", num(cac.post_capture_meta_new_customers ?? cac.meta_new_customers, 0))}
+      ${card("First-party CAC", cac.first_party_observed_new_customer_cac == null ? "Collecting data" : money(cac.first_party_observed_new_customer_cac))}
+      ${card("How much eligible sales we can attribute", cac.attribution_coverage_pct == null ? "Collecting data" : pct(cac.attribution_coverage_pct))}
     </div>
   </section>
   <section>
@@ -1435,27 +1538,26 @@ function renderCustomers(ctx) {
 </div>`;
 }
 
-function pricingRows(list, cols = 10) {
+function pricingRows(list, cols = 7) {
   if (!list?.length) {
     return `<tr><td colspan="${cols}" class="empty">None.</td></tr>`;
   }
   return list
     .map((r) => {
-      const disc =
-        r.recommended_discount_pct != null
-          ? `${escapeHtml(String(r.recommended_discount_pct))}% → ${money(r.recommended_price)}`
-          : "—";
+      const discount = r.recommended_discount_pct == null ? "—" : pct(r.recommended_discount_pct);
+      const suggested = r.recommended_price == null ? "Hold current price" : money(r.recommended_price);
+      const afterMargin = r.scenario?.accounting_gm_ex_tax_pct ?? r.accounting_gm_ex_tax_pct;
+      const why = r.recommended_discount_pct != null
+        ? `${num(r.recommended_discount_pct, 0)}% is the largest recommended step while preserving the configured accounting margin floor.`
+        : r.note || "Current economics do not support a safer price change.";
       return `<tr>
-      <td>${escapeHtml(r.sku || "—")}</td>
-      <td>${escapeHtml(r.product || "—")}<div class="muted">${escapeHtml(r.variant || "")}</div></td>
-      <td>${num(r.current_stock, 0)}</td>
-      <td>${escapeHtml(r.stock_class || "—")}</td>
+      <td>${escapeHtml(r.product || "—")}<div class="muted">${escapeHtml(r.variant || r.sku || "")}</div></td>
       <td>${money(r.current_price)}</td>
-      <td>${pct(r.commercial_sticker_gm_pct ?? r.unit_gm_pct)}</td>
-      <td>${pct(r.accounting_gm_ex_tax_pct)}</td>
-      <td><strong>${escapeHtml(r.recommendation || "—")}</strong><div class="muted">${disc}${r.immature_for_clearance ? " · immature" : ""}</div></td>
-      <td>${num(r.required_unit_lift_to_preserve_gp, 2)}</td>
+      <td><strong>${suggested}</strong></td>
+      <td>${discount}</td>
+      <td>${pct(afterMargin)}</td>
       <td>${money(r.inventory_cost_capital_tied_up)}</td>
+      <td>${escapeHtml(why)}</td>
     </tr>`;
     })
     .join("");
@@ -1485,8 +1587,7 @@ function renderPricing(ctx) {
 
   const s = pr.summary || {};
   const th = `<thead><tr>
-  <th>SKU</th><th>Product</th><th>Stock</th><th>Class</th><th>Price</th><th>Sticker GM</th><th>Acct GM</th>
-  <th>Recommendation</th><th>GP lift</th><th>Capital</th>
+  <th>Product</th><th>Current price</th><th>Suggested price</th><th>Discount</th><th>Accounting margin after discount</th><th>Inventory capital</th><th>Why</th>
 </tr></thead>`;
   const warnList = (pr.data_quality?.warnings || [])
     .slice(0, 40)
@@ -1541,42 +1642,34 @@ function renderPricing(ctx) {
     .join("");
 
   return `<div id="view-pricing" class="view">
-  <section>
-    <div class="divider-label">PRICING &amp; PROMOTION INTELLIGENCE</div>
-    <h2>Pricing Overview</h2>
+  <section class="hero-section">
+    <div class="eyebrow">What you need to know</div>
+    <h2>Pricing opportunities</h2>
     <p class="note">Safe discounts use Books ex-tax GM floors (splitInclusiveTax). Sticker GP remains visible. Clearance requires ≥90d sellable age. Advisory only — no price writes.</p>
     <div class="grid">
-      ${card("SKUs", num(s.sku_count, 0))}
-      ${card("Protect", num(s.protect_price_count, 0))}
-      ${card("Hold", num(s.hold_price_count, 0))}
-      ${card("Small discount", num(s.test_small_discount_count, 0))}
-      ${card("Promotion", num(s.promotion_count, 0))}
-      ${card("Clearance", num(s.clearance_count, 0), "", "warn")}
-      ${card("Price increase tests", num(s.price_increase_count, 0))}
-      ${card("Insufficient", num(s.insufficient_count, 0))}
-      ${card("Excluded immature", num(s.excluded_immature_clearance_count, 0))}
-      ${card("Mixed-variant products", num(s.mixed_variant_product_count, 0))}
+      ${card("Clearance capital", money(s.capital_tied_up_clearance), `${num(s.clearance_count, 0)} mature candidates`, "warn")}
+      ${card("Promotion capital", money(s.capital_tied_up_promotion), `${num(s.promotion_count, 0)} candidates`)}
+      ${card("Mature clearance SKUs", num(s.clearance_count, 0))}
+      ${card("Blocked because too new", num(s.excluded_immature_clearance_count, 0))}
+      ${card("Mixed variants needing review", num(s.mixed_variant_product_count, 0), "Avoid product-wide markdowns", "warn")}
     </div>
   </section>
-  <section>
-    <h2>Capital Tied Up</h2>
-    <div class="grid">
-      ${card("Clearance cost capital", money(s.capital_tied_up_clearance))}
-      ${card("Promotion cost capital", money(s.capital_tied_up_promotion))}
-      ${card("Combined", money(s.capital_tied_up_promotion_and_clearance))}
-    </div>
-  </section>
-  <section>
-    <h2>Clearance Candidates</h2>
+  <section class="recommendation-group group-clearance">
+    <div class="eyebrow">What needs action</div>
+    <h2>Clearance</h2>
     <table>${th}<tbody>${pricingRows((pr.clearance_candidates || []).slice(0, 20))}</tbody></table>
   </section>
-  <section>
-    <h2>Promotion Candidates</h2>
+  <section class="recommendation-group group-promotion">
+    <h2>Promotion</h2>
     <table>${th}<tbody>${pricingRows((pr.promotion_candidates || []).slice(0, 20))}</tbody></table>
   </section>
-  <section>
+  <section class="recommendation-group group-protect">
     <h2>Protect Price</h2>
     <table>${th}<tbody>${pricingRows((pr.protect_price || []).slice(0, 15))}</tbody></table>
+  </section>
+  <section class="recommendation-group group-hold">
+    <h2>Hold</h2>
+    <p class="note">${num(s.hold_price_count, 0)} SKUs should keep their current price. Supporting rows are available in the embedded report data.</p>
   </section>
   <section>
     <h2>Mixed Variant Review</h2>
@@ -1586,8 +1679,8 @@ function renderPricing(ctx) {
       <tbody>${mixedRows || `<tr><td colspan="6" class="empty">None.</td></tr>`}</tbody>
     </table>
   </section>
-  <section>
-    <h2>Price Increase Tests</h2>
+  <section class="recommendation-group group-increase">
+    <h2>Price Increase Test</h2>
     <p class="note">PRICE INCREASE TEST CANDIDATE — not a guaranteed revenue improvement. Demand may change.</p>
     <table>
       <thead><tr><th>SKU</th><th>Product</th><th>Price</th><th>+5%</th><th>GP uplift/unit</th><th>Stock class</th><th>Conf</th></tr></thead>
@@ -1635,40 +1728,39 @@ function renderMarketingDecisions(ctx) {
   const s = md.summary || {};
   const acc = md.account_decision || {};
   const ev = md.evidence_quality || {};
-  const biz = md.business_context || {};
+  const [posture, postureExplanation] = accountPosture(acc.recommendation);
 
   const queueRows = (md.owner_action_queue || [])
-    .slice(0, 10)
+    .slice(0, 12)
     .map(
       (a) => `<tr>
-      <td>${escapeHtml(a.priority || "—")}</td>
-      <td><strong>${escapeHtml(a.primary_action || "—")}</strong>${
-        a.secondary_action
-          ? `<div class="muted">${escapeHtml(a.secondary_action)}</div>`
-          : ""
-      }</td>
+      <td><span class="priority priority-${escapeHtml(a.priority || "P4")}">${escapeHtml(a.priority || "P4")}</span></td>
+      <td><span class="action action-${actionTone(a.secondary_action || a.primary_action)}">${escapeHtml(actionLabel(a.secondary_action || a.primary_action))}</span></td>
       <td>${escapeHtml(a.entity_name || a.entity_id || "—")}</td>
-      <td>${money(a.spend)}</td>
-      <td>${escapeHtml(a.reason || (a.reason_codes || []).slice(0, 3).join(", "))}</td>
-      <td>${escapeHtml(a.confidence || "—")}</td>
+      <td>${escapeHtml(friendlyReason(a))}${reasonDetails(a)}</td>
+      <td>${money(a.spend, ctx.cur)}</td>
+      <td>${a.purchases == null ? "Not applicable" : num(a.purchases, 0)}</td>
+      <td>${a.meta_cpa == null ? (a.purchases == null ? "Not applicable" : Number(a.purchases) === 0 ? "No purchases" : "Not available") : money(a.meta_cpa, ctx.cur)}</td>
+      <td><span class="confidence">${escapeHtml(a.confidence || "Unknown")}</span></td>
     </tr>`
     )
     .join("");
 
-  const actionTable = (list, cols = 6) => {
+  const actionTable = (list, emptyMessage, cols = 7) => {
     if (!list?.length) {
-      return `<tr><td colspan="${cols}" class="empty">None.</td></tr>`;
+      return `<tr><td colspan="${cols}" class="empty-state">${escapeHtml(emptyMessage)}</td></tr>`;
     }
     return list
       .slice(0, 12)
       .map(
         (a) => `<tr>
       <td>${escapeHtml(a.entity_name || a.entity_id || "—")}</td>
-      <td>${money(a.spend)}</td>
+      <td><span class="action action-${actionTone(a.primary_action)}">${escapeHtml(actionLabel(a.primary_action))}</span></td>
+      <td>${escapeHtml(friendlyReason(a))}${reasonDetails(a)}</td>
+      <td>${money(a.spend, ctx.cur)}</td>
       <td>${num(a.purchases, 0)}</td>
-      <td><strong>${escapeHtml(a.primary_action || "—")}</strong></td>
-      <td>${escapeHtml((a.reason_codes || []).slice(0, 3).join(", ") || "—")}</td>
-      <td>${escapeHtml(a.confidence || "—")}</td>
+      <td>${a.meta_cpa == null ? (a.purchases == null ? "Not applicable" : Number(a.purchases) === 0 ? "No purchases" : "Not available") : money(a.meta_cpa, ctx.cur)}</td>
+      <td><span class="confidence">${escapeHtml(a.confidence || "Unknown")}</span></td>
     </tr>`
       )
       .join("");
@@ -1680,90 +1772,35 @@ function renderMarketingDecisions(ctx) {
     .join("");
 
   return `<div id="view-marketing" class="view">
-  <section>
-    <div class="divider-label">MARKETING DECISION ENGINE</div>
-    <h2>Account Recommendation</h2>
-    <p class="note">Three layers stay separate: business affordability · Meta platform · first-party attributed. Advisory only.</p>
-    <div class="grid">
-      ${card("Account", escapeHtml(acc.recommendation || "—"))}
-      ${card("Confidence", escapeHtml(acc.confidence || "—"))}
-      ${card("Business health", escapeHtml(biz.business_health?.status || "—"))}
-      ${card("Ad affordability", escapeHtml(biz.business_advertising_safety?.status || "—"))}
-      ${card("Evidence", escapeHtml(ev.marketing_evidence_confidence || "—"))}
-      ${card("FP attribution", escapeHtml(ev.fp_evidence?.status || "—"))}
-    </div>
-    <p class="note">${escapeHtml(acc.guidance || "")}</p>
+  <section class="posture-card posture-${actionTone(acc.recommendation === "REDUCE_SPEND" ? "REDUCE" : acc.recommendation === "DEFENSIVE_MODE" ? "PAUSE" : acc.recommendation === "SCALE_CAUTIOUSLY" ? "SCALE" : "HOLD")}">
+    <div class="eyebrow">Account posture</div>
+    <div class="posture-title">${escapeHtml(posture.toUpperCase())}</div>
+    <p class="posture-explanation">${escapeHtml(postureExplanation)}</p>
+    <p class="note">Confidence: <strong>${escapeHtml(acc.confidence || "Unknown")}</strong> ${tip(TIPS.confidence)} · Advisory only; no automatic budget changes.</p>
   </section>
   <section>
-    <h2>Owner Action Queue</h2>
-    <table>
-      <thead><tr><th>P</th><th>Action</th><th>Entity</th><th>Spend</th><th>Why</th><th>Conf</th></tr></thead>
-      <tbody>${queueRows || `<tr><td colspan="6" class="empty">None.</td></tr>`}</tbody>
-    </table>
+    <div class="eyebrow">What to do now</div>
+    <h2>Ranked action queue</h2>
+    <div class="table-wrap"><table class="action-table marketing-queue">
+      <thead><tr><th>Priority</th><th>Action</th><th>Ad / entity</th><th>Why</th><th>Spend</th><th>Purchases</th><th>CPA</th><th>Confidence ${tip(TIPS.confidence)}</th></tr></thead>
+      <tbody>${queueRows || `<tr><td colspan="8" class="empty-state">No marketing actions currently meet the evidence threshold.</td></tr>`}</tbody>
+    </table></div>
   </section>
-  <section>
-    <h2>Scale</h2>
-    <table>
-      <thead><tr><th>Entity</th><th>Spend</th><th>Purch</th><th>Action</th><th>Reasons</th><th>Conf</th></tr></thead>
-      <tbody>${actionTable(md.scale_candidates)}</tbody>
-    </table>
-  </section>
-  <section>
-    <h2>Hold</h2>
-    <p class="muted">${num(s.hold_count, 0)} entities</p>
-  </section>
-  <section>
-    <h2>Reduce</h2>
-    <table>
-      <thead><tr><th>Entity</th><th>Spend</th><th>Purch</th><th>Action</th><th>Reasons</th><th>Conf</th></tr></thead>
-      <tbody>${actionTable(md.reduce_candidates)}</tbody>
-    </table>
-  </section>
-  <section>
-    <h2>Pause</h2>
-    <table>
-      <thead><tr><th>Entity</th><th>Spend</th><th>Purch</th><th>Action</th><th>Reasons</th><th>Conf</th></tr></thead>
-      <tbody>${actionTable(md.pause_candidates)}</tbody>
-    </table>
-  </section>
-  <section>
-    <h2>Creative Tests</h2>
-    <table>
-      <thead><tr><th>Entity</th><th>Spend</th><th>Purch</th><th>Action</th><th>Reasons</th><th>Conf</th></tr></thead>
-      <tbody>${actionTable(md.creative_tests)}</tbody>
-    </table>
-  </section>
-  <section>
-    <h2>Promotion Tests</h2>
-    <p class="note">Secondary recommendation only — never auto-creates discounts.</p>
-    <table>
-      <thead><tr><th>Entity</th><th>Spend</th><th>Purch</th><th>Action</th><th>Reasons</th><th>Conf</th></tr></thead>
-      <tbody>${actionTable(md.promotion_tests)}</tbody>
-    </table>
-  </section>
-  <section>
-    <h2>Inventory Constraints</h2>
-    <p class="note">Requires explicit entity↔product mapping. Unmapped entities stay UNKNOWN.</p>
-    <table>
-      <thead><tr><th>Entity</th><th>Spend</th><th>Purch</th><th>Action</th><th>Reasons</th><th>Conf</th></tr></thead>
-      <tbody>${actionTable(md.inventory_constraints)}</tbody>
-    </table>
-  </section>
-  <section>
-    <h2>Evidence Quality</h2>
-    <div class="grid">
-      ${card("Marketing", escapeHtml(ev.marketing_evidence_confidence || "—"))}
-      ${card("FP status", escapeHtml(ev.fp_evidence?.status || "—"))}
-      ${card("FP coverage", ev.fp_evidence?.attributed_coverage_pct == null ? "—" : pct(ev.fp_evidence.attributed_coverage_pct))}
-      ${card("Scale", num(s.scale_count, 0))}
-      ${card("Reduce", num(s.reduce_count, 0))}
-      ${card("Pause", num(s.pause_count, 0))}
-    </div>
-    <p class="note">${escapeHtml(ev.fp_evidence?.note || "")}</p>
-  </section>
-  <section>
-    <h2>Data Quality</h2>
-    <ul class="warn-list">${blockers || `<li class="empty">No blockers.</li>`}</ul>
+  <details class="secondary-section">
+    <summary>Action groups and supporting detail</summary>
+    <section><h2>Scale</h2><table><thead><tr><th>Entity</th><th>Action</th><th>Why</th><th>Spend</th><th>Purchases</th><th>CPA</th><th>Confidence</th></tr></thead><tbody>${actionTable(md.scale_candidates, "No scale candidates currently meet the evidence threshold.")}</tbody></table></section>
+    <section><h2>Hold</h2><p class="empty-state">${num(s.hold_count, 0)} entities should remain unchanged while evidence develops.</p></section>
+    <section><h2>Reduce</h2><table><thead><tr><th>Entity</th><th>Action</th><th>Why</th><th>Spend</th><th>Purchases</th><th>CPA</th><th>Confidence</th></tr></thead><tbody>${actionTable(md.reduce_candidates, "No ads currently need a spend reduction.")}</tbody></table></section>
+    <section><h2>Pause</h2><table><thead><tr><th>Entity</th><th>Action</th><th>Why</th><th>Spend</th><th>Purchases</th><th>CPA</th><th>Confidence</th></tr></thead><tbody>${actionTable(md.pause_candidates, "No ads currently meet the pause threshold.")}</tbody></table></section>
+    <section><h2>Creative test</h2><table><thead><tr><th>Entity</th><th>Action</th><th>Why</th><th>Spend</th><th>Purchases</th><th>CPA</th><th>Confidence</th></tr></thead><tbody>${actionTable(md.creative_tests, "No creative tests are currently recommended.")}</tbody></table></section>
+    <section><h2>Promotion test</h2><p class="note">A secondary recommendation only; this never creates discounts automatically.</p><table><thead><tr><th>Entity</th><th>Action</th><th>Why</th><th>Spend</th><th>Purchases</th><th>CPA</th><th>Confidence</th></tr></thead><tbody>${actionTable(md.promotion_tests, "No promotion tests are currently recommended.")}</tbody></table></section>
+    <section><h2>Inventory constraints</h2><p class="note">Product mapping is required before stock constraints can be applied to a Meta ad.</p><table><thead><tr><th>Entity</th><th>Action</th><th>Why</th><th>Spend</th><th>Purchases</th><th>CPA</th><th>Confidence</th></tr></thead><tbody>${actionTable(md.inventory_constraints, "No product mapping exists yet, so inventory constraints cannot be applied to Meta ads.")}</tbody></table></section>
+  </details>
+  <section class="quality-section">
+    <div class="eyebrow">Data quality and caveats</div>
+    ${dataQualityLine(md.data_quality)}
+    <p class="note">${ev.fp_evidence?.attributed_coverage_pct == null ? "First-party attribution is still collecting data." : `We can currently attribute ${pct(ev.fp_evidence.attributed_coverage_pct)} of eligible sales.`}</p>
+    <details><summary>Detailed diagnostics</summary><ul class="warn-list">${blockers || `<li class="empty">No critical blockers.</li>`}</ul></details>
   </section>
 </div>`;
 }
@@ -1921,6 +1958,10 @@ header.hero h1 {
 .btn-print:hover { background: var(--accent-dark); }
 .view { display: none; }
 .view.active { display: block; }
+.eyebrow { margin-bottom: 8px; color: var(--accent); font-size: 10px; font-weight: 850; letter-spacing: .16em; text-transform: uppercase; }
+.hero-section { border-color: #c8ddd8; background: linear-gradient(145deg, #f4fbf9 0, #fff 62%); }
+.executive-verdict { max-width: 980px; margin: 0 0 20px; font-size: clamp(18px, 2vw, 25px); line-height: 1.4; letter-spacing: -.02em; font-weight: 650; }
+.key-grid .card:first-child { grid-column: span 2; }
 section {
   background: var(--surface-raised);
   border: 1px solid var(--line);
@@ -1981,6 +2022,9 @@ section h3 { margin: 0 0 9px; font-size: 15px; letter-spacing: -.01em; }
 .tone-ok .card-value, .pill.tone-ok, .tone-ok { color: var(--ok); }
 .tone-warn .card-value, .pill.tone-warn, .tone-warn { color: var(--warn); }
 .tone-bad .card-value, .pill.tone-bad, .tone-bad { color: var(--bad); }
+.tone-info, .action-info { color: #1d4ed8; }
+.tone-accent, .action-accent { color: #7c3aed; }
+.tone-muted, .action-muted { color: var(--faint); }
 .pill {
   display: inline-flex;
   align-items: center;
@@ -2026,6 +2070,8 @@ thead th:last-child { border-radius: 0 9px 0 0; }
 tbody tr:nth-child(even):not(.total-row) { background: #fafbf9; }
 tbody tr:hover:not(.total-row) { background: #f3f8f6; }
 table th:not(:first-child), table td:not(:first-child) { text-align: right; }
+.action-table th, .action-table td { text-align: left !important; }
+.action-table td:nth-last-child(-n+3) { white-space: nowrap; }
 .ad-table th:nth-child(2), .ad-table td:nth-child(2),
 .ad-table th:last-child, .ad-table td:last-child { text-align: left; }
 .pl-table td:last-child { width: 36%; text-align: right; }
@@ -2040,6 +2086,7 @@ table th:not(:first-child), table td:not(:first-child) { text-align: right; }
 .note { max-width: 880px; margin: 9px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
 section > h2 + .note, section > h2 + p.note { margin: -7px 0 17px; }
 .empty { color: var(--muted); font-style: italic; }
+.empty-state { padding: 20px !important; color: var(--muted); text-align: center !important; background: #fafbf9; font-style: normal; }
 .tip {
   display: inline-flex;
   align-items: center;
@@ -2073,6 +2120,40 @@ section > h2 + .note, section > h2 + p.note { margin: -7px 0 17px; }
   background: var(--accent-soft);
   font-size: 15px;
 }
+.callout { margin: 16px 0 0; padding: 12px 15px; border-left: 3px solid var(--line-strong); border-radius: 0 9px 9px 0; background: #f7f8f6; font-size: 13px; }
+.callout.warning { border-color: var(--warn); background: var(--warn-bg); color: #68400d; }
+.quality-line { margin: 0; font-size: 14px; }
+.quality-section { box-shadow: none; background: #fafbf9; }
+.secondary-section { margin-bottom: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
+.secondary-section > summary { margin: 0; padding: 17px 20px; color: var(--ink); font-weight: 700; }
+.secondary-section > section { margin: 0 14px 14px; box-shadow: none; }
+.priority { display: inline-grid; place-items: center; width: 36px; height: 30px; border-radius: 8px; background: #edf0ee; font-weight: 850; }
+.priority-P1 { color: var(--bad); background: var(--bad-bg); border: 1px solid #efcecb; }
+.priority-P2 { color: var(--warn); background: var(--warn-bg); border: 1px solid #efdcae; }
+.priority-P3 { color: var(--accent-dark); background: var(--accent-soft); }
+.action { display: inline-flex; padding: 5px 9px; border-radius: 7px; background: #f0f2f1; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.action-bad { color: var(--bad); background: var(--bad-bg); }
+.action-warn { color: var(--warn); background: var(--warn-bg); }
+.action-ok { color: var(--ok); background: var(--ok-bg); }
+.action-info { background: #edf4ff; }
+.action-accent { background: #f4efff; }
+.confidence { color: var(--muted); font-size: 12px; text-transform: capitalize; }
+.reason-details summary { margin-top: 5px; color: var(--muted); font-size: 11px; }
+.reason-details code { display: block; margin-top: 5px; color: var(--faint); font-size: 10px; white-space: normal; }
+.posture-card { padding: 30px; border-width: 1px 1px 1px 5px; }
+.posture-title { font-size: clamp(29px, 4vw, 48px); line-height: 1; letter-spacing: -.04em; font-weight: 850; text-transform: uppercase; }
+.posture-explanation { max-width: 800px; margin: 15px 0 4px; font-size: 17px; line-height: 1.55; }
+.posture-bad { border-left-color: var(--bad); }
+.posture-warn { border-left-color: var(--warn); }
+.posture-ok { border-left-color: var(--ok); }
+.posture-neutral { border-left-color: var(--accent); }
+.recommendation-group { border-left-width: 4px; }
+.group-clearance { border-left-color: var(--bad); }
+.group-promotion { border-left-color: var(--accent); }
+.group-hold { border-left-color: var(--line-strong); }
+.group-protect { border-left-color: var(--ok); }
+.group-increase { border-left-color: #7c3aed; }
+.table-wrap { width: 100%; overflow-x: auto; }
 .rec-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
 .rec-list li { border: 1px solid var(--line); border-radius: 11px; padding: 12px; background: #fbfcfa; }
 .alert-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
@@ -2215,6 +2296,7 @@ footer { margin-top: 20px; color: var(--muted); font-size: 12px; text-align: cen
   section { padding: 18px 16px; border-radius: 14px; }
   section h2 { font-size: 17px; }
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .key-grid .card:first-child { grid-column: auto; }
   .card { min-height: 106px; padding: 13px; }
   .card-value { font-size: 19px; overflow-wrap: anywhere; }
   .section-shopify::after { display: none; }
@@ -2235,6 +2317,8 @@ footer { margin-top: 20px; color: var(--muted); font-size: 12px; text-align: cen
   .card { min-height: 0; }
   th { position: static; }
   body { background: #fff; }
+  details.secondary-section > * { display: block !important; }
+  .table-wrap { overflow: visible; }
 }
 `;
 
@@ -2252,6 +2336,14 @@ document.querySelectorAll('.nav-btn').forEach(function(btn) {
 });
 var printBtn = document.getElementById('print-btn');
 if (printBtn) printBtn.addEventListener('click', function() { window.print(); });
+var printDetails = [];
+window.addEventListener('beforeprint', function() {
+  printDetails = Array.prototype.map.call(document.querySelectorAll('details'), function(d) { return d.open; });
+  document.querySelectorAll('details').forEach(function(d) { d.open = true; });
+});
+window.addEventListener('afterprint', function() {
+  document.querySelectorAll('details').forEach(function(d, i) { d.open = !!printDetails[i]; });
+});
 document.querySelectorAll('#product-filters .filter-btn').forEach(function(btn) {
   btn.addEventListener('click', function() {
     document.querySelectorAll('#product-filters .filter-btn').forEach(function(b) { b.classList.remove('active'); });
