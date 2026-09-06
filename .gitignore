@@ -14,6 +14,8 @@ credentials*.json
 # Generated Meta / merged / profitability reports (keep folder placeholders only)
 reports/meta/**
 !reports/meta/.gitkeep
+reports/ads-audit/**
+!reports/ads-audit/.gitkeep
 reports/merged/**
 !reports/merged/.gitkeep
 reports/profitability/**
