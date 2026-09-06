@@ -7,6 +7,7 @@ const {
   formatPct,
   formatRoas,
 } = require("../meta/metrics");
+const { tipsFromRegistry, sourceBadge: registrySourceBadge } = require("./metrics");
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -152,30 +153,42 @@ function formatCpaEvidenceHtml(entity, { moneyFn, escapeFn } = {}) {
   };
 }
 
+const REGISTRY_TIPS = tipsFromRegistry();
+
 const TIPS = {
+  ...REGISTRY_TIPS,
   business_wide_ad_load:
+    REGISTRY_TIPS.business_ad_load ||
     "Actual Meta spend divided by all recognized business orders during the same period, including Shopify, Manual and Other Sales.",
   shopify_ad_load:
     "Actual Meta spend divided by recognized Shopify orders during the same period. This is blended context and does not mean every Shopify order came from Meta. Not CAC.",
-  meta_cpa: "Meta-reported cost per purchase: spend divided by purchases attributed by Meta.",
+  meta_cpa:
+    REGISTRY_TIPS.meta_cpa ||
+    "Meta-reported cost per purchase: spend divided by purchases attributed by Meta.",
   break_even_cpa:
+    REGISTRY_TIPS.break_even_cpa ||
     "Business profit available before ads divided by all recognized business orders. This is a business-wide safety threshold, not Meta-attributed CPA.",
   meta_adjusted_profit:
+    REGISTRY_TIPS.meta_adjusted_profit ||
     "Books economics with booked Ads expense replaced analytically by actual date-aligned Meta spend. Meta spend is not double-counted.",
   books_net_profit:
+    REGISTRY_TIPS.books_net_profit ||
     "Accounting result using booked Ledger expenses (including booked Ads).",
   books_gross_margin:
     "Official Books gross margin using Ledger net revenue and all official COGS, including Gift/PR COGS.",
-  meta_roas: "Revenue reported by Meta per Rs 1 of ad spend.",
+  meta_roas:
+    REGISTRY_TIPS.meta_roas || "Revenue reported by Meta per Rs 1 of ad spend.",
   blended_mer:
-    "Total recognized revenue divided by Meta spend.",
+    REGISTRY_TIPS.mer || "Total recognized revenue divided by Meta spend.",
   gross_margin:
+    REGISTRY_TIPS.gross_margin ||
     "Revenue left after product cost, before operating expenses.",
   confidence:
-    "How much evidence supports this recommendation.",
+    "How much evidence supports this recommendation. High = strong evidence; Low / Insufficient = treat carefully.",
   affordability:
     "Measures whether the overall business economics can absorb current Meta spend. Includes Shopify, Manual and Other Sales. It is not a measure of ecommerce acquisition efficiency.",
   shopify_contribution:
+    REGISTRY_TIPS.shopify_contribution ||
     "Shopify net revenue minus Shopify COGS minus date-aligned Meta spend. Shared operating expenses are not allocated. Not Meta-attributed profit. Refunds do not automatically reverse COGS.",
   shopify_net_revenue:
     "Shopify net revenue is recognized Shopify revenue after Ledger refunds. COGS is Ledger-driven; refunds do not automatically reverse COGS unless corresponding accounting entries exist.",
@@ -184,10 +197,30 @@ const TIPS = {
   paid_sales_gm:
     "Paid Sales GM uses recognized paid-channel net revenue and paid-channel COGS (excludes Gift/PR). Books GM includes all official Ledger COGS.",
   recognized_order:
+    REGISTRY_TIPS.recognized_orders ||
     "An order satisfying the Books recognition rules.",
   open_pipeline:
     "Shopify orders not yet recognized into accounting revenue. Open pipeline is not recognized revenue.",
+  forecast:
+    "Projected figure from recent pace — FORECAST, not an accounting fact.",
+  ctr: REGISTRY_TIPS.ctr,
+  cpc: REGISTRY_TIPS.cpc,
+  cpm: REGISTRY_TIPS.cpm,
+  mer: REGISTRY_TIPS.mer,
+  aov: REGISTRY_TIPS.aov,
+  cogs: REGISTRY_TIPS.cogs,
+  repeat_rate: REGISTRY_TIPS.repeat_rate,
+  attribution_coverage: REGISTRY_TIPS.attribution_coverage,
+  inventory_capital_at_risk: REGISTRY_TIPS.inventory_capital_at_risk,
 };
+
+function sourceBadgeHtml(source) {
+  const label = registrySourceBadge(source);
+  const cls = String(label)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
+  return `<span class="src-badge src-${cls}">${escapeHtml(label)}</span>`;
+}
 
 module.exports = {
   escapeHtml,
@@ -198,6 +231,7 @@ module.exports = {
   statusClass,
   prettyStatus,
   tip,
+  sourceBadgeHtml,
   TIPS,
   cpaEvidenceParts,
   formatCpaEvidenceHtml,
