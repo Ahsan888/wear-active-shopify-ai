@@ -63,11 +63,26 @@ npm run meta:report -- --json
 npm run meta:report:full -- --days=30
 npm run meta:report:full -- --since=2026-08-01 --until=2026-09-05
 
+# Sync Meta spend → Recurring Expenses + Ledger (monthly upsert)
+npm run meta:expenses:sync              # dry-run current month MTD
+npm run meta:expenses:sync:apply        # write sheets
+npm run meta:expenses:sync -- --months=3
+npm run meta:expenses:sync:apply -- --month=2026-08
+
+# Also runs automatically inside books:sync:apply (current month only)
+
 # Conservative merge stub (Meta-only is fine; no attribution invented)
 npm run reports:merge -- --meta=reports/meta/YYYY-MM-DD_to_YYYY-MM-DD/summary.json
 ```
 
 Generated files land under `reports/meta/` and `reports/merged/` (gitignored).
+
+### Meta → books (Recurring Expenses)
+
+- Grain: **one Ads row per calendar month** (amount = Insights account spend MTD).
+- Re-running on the 10th then 19th **updates the same row** — does not add a second expense.
+- Markers: Recurring Notes `ref:META:YYYY-MM`; Ledger Ref Key `EXP:META:YYYY-MM`.
+- Soft-skips inside `books:sync` if Meta credentials are missing.
 
 ## KPI notes
 

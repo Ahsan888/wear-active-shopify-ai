@@ -21,7 +21,7 @@ source code, prompts, docs, and a small visual reference stay in the repo.
 |---|---|---|
 | Shopify Admin client | `src/shopify/` | GraphQL auth + catalog/inventory helpers |
 | Google Sheets client | `src/sheets/` | Service-account access to WA Athleisure Stock |
-| Books engine | `src/books/` + `src/scripts/books-*.js` | LIVE → Ledger → Dashboard / P&L / Analytics |
+| Books engine | `src/books/` + `src/scripts/books-*.js` | LIVE → Ledger → Dashboard / Month Detail / P&L / Analytics |
 | Inventory / SKU ops | `src/scripts/` | Align SKUs, set stock, Variant Master helpers |
 | Order webhook | `apps-script/shopify-webhook.js` | Shopify → `Shopify Orders (LIVE)` |
 | Photo editor | `wear-active-editor/` | OpenAI image edit + local WebP conversion |
@@ -101,7 +101,7 @@ Local-only under the editor (gitignored): `input/`, `photos/`, `gpt_output/`,
 | `sheets:info` | Verify Sheets access |
 | `shopify:align-skus` | Align Shopify SKUs to Variant Master (`--apply` to write) |
 | `books:sync` | Dry-run LIVE → Ledger + reports |
-| `books:sync:apply` | Apply posting + rebuild Dashboard / P&L / Analytics |
+| `books:sync:apply` | Apply posting + Meta Ads expenses + rebuild Dashboard / Month Detail / P&L / Analytics |
 | `books:hygiene` | Ledger date / category cleanup helpers |
 | `books:archive` | Archive noisy sheet tabs |
 | `bundles:setup` | Audit mix-and-match eligibility and automatic discounts (`--apply` to write) |
@@ -112,6 +112,8 @@ Local-only under the editor (gitignored): `input/`, `photos/`, `gpt_output/`,
 | `meta:check` | Verify Meta Ads token + ad account insights |
 | `meta:report` | Campaign/adset/ad performance report (`--json` supported) |
 | `meta:report:full` | Export detailed Meta report files under `reports/meta/` |
+| `meta:expenses:sync` | Dry-run Meta spend → Recurring Expenses + Ledger (monthly upsert) |
+| `meta:expenses:sync:apply` | Write Meta monthly Ads spend into Recurring Expenses + Ledger |
 | `meta:test` | Pure-function tests for Meta metrics/CLI validation |
 | `reports:merge` | Conservative Meta (+ optional Shopify) merge stub |
 | `profitability:report` | Blended Meta + Books profitability (read-only) |

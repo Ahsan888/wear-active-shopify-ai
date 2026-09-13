@@ -7,6 +7,7 @@ Your Google Sheet is now a **thin operating system**:
 | You look at | Purpose |
 |---|---|
 | **Dashboard** | This month / last month / MoM / YTD health check + open pipeline |
+| **Month Detail** | Central hub — filter one month to see P&L, channels, tax, routes, gifts/PR, expenses, top items |
 | **Monthly P&L** | One clean month-by-month operating table |
 | **Analytics** | Focus areas: pipeline, expenses, tax, delivery, products, trends |
 | **Shopify Analytics** | Shopify year-over-year economics, delivery routes, and annual top items |
@@ -34,7 +35,7 @@ Shopify Orders (LIVE)   ← always lands here first
         ↓ (you run books:sync weekly)
 Ledger                  ← only if “Recognized”
         ↓ (same sync)
-Dashboard / Monthly P&L / Analytics
+Dashboard / Month Detail / Monthly P&L / Analytics
 ```
 
 Webhook **does not** write the Ledger. That is intentional (COD / undelivered would fake revenue).
@@ -104,7 +105,17 @@ On **Recurring Expenses**:
 - Courier bills → category **`Delivery`**
 - Ads, Platform fees, Ops, etc. → those category names
 
-Those feed Ledger (via your existing expense posting / future sync) and show on Dashboard as Delivery vs Other expenses.
+**Meta Ads** are synced automatically (monthly MTD upsert) when you run
+`npm run books:sync:apply` or `npm run meta:expenses:sync:apply`. One row per
+month (`Meta Ads YYYY-MM`, Notes `ref:META:YYYY-MM`) updates in place if you
+re-run mid-month — it does not stack. The same amount posts to **Ledger** as
+`Expense` / `Ads` with Ref Key `EXP:META:YYYY-MM` so Month Detail / P&L move.
+
+Do **not** also hand-enter a duplicate “Meta Ads” line for a month the sync
+already covers (that double-counts Ads).
+
+Other expenses still feed Ledger via your existing expense posting; Meta is the
+automated Ads path.
 
 ---
 
@@ -123,8 +134,9 @@ npm run books:sync:apply    # actually post + rebuild reports
 1. Pulls latest **payment / fulfillment / tags** from Shopify onto LIVE
 2. Fills **DeliveryMode, TaxChargeable, TaxAmount, RevenueExTax, Recognized, Posted**
 3. Posts only lines where **Recognized = Y** and **Posted = N**
-4. Rebuilds **Dashboard**, **Monthly P&L**, **Analytics**
-5. Clears old Dashboard charts so numbers stay visible
+4. Upserts **Meta Ads** into Recurring Expenses + Ledger (current month MTD)
+5. Rebuilds **Dashboard**, **Month Detail**, **Monthly P&L**, **Analytics**
+6. Clears old Dashboard charts so numbers stay visible
 
 ### When a LIVE line is “Recognized”
 
@@ -152,6 +164,27 @@ npm run books:sync:apply    # actually post + rebuild reports
 - **AOV** = net revenue ex-tax / orders.
 - **Open pipeline** is unrecognized, unposted LIVE demand. It is risk/opportunity,
   not revenue. Cancelled/refunded and already-posted lines are excluded.
+
+### Month Detail
+
+Central month hub. It opens on the latest month by default; use the **Month** filter
+to switch periods. The context columns stay pinned while you scroll through the
+grouped financial, operating, activity, and notes columns:
+
+1. **P&L** — full operating summary (net profit highlights green/red)
+2. **Channel** — Shopify / Manual / Other Sales revenue, tax, COGS, gross profit
+3. **Tax** — output tax, taxable vs exempt/legacy revenue
+4. **Shopify route** — Courier / Booked ourselves / Gift & PR / Legacy
+5. **Gift & PR** — giveaway count and COGS impact (Rs 0 revenue)
+6. **Expenses** — Delivery vs Ads/ops categories
+7. **Top items** — top 5 by channel for that month
+
+Start with the dark **P&L summary** row, then scan the colored block labels down
+the left. Positive/negative net profit and margin cells are highlighted; zeroes
+display as dashes, and the hidden Year helper column keeps the working view clean.
+Use this before digging into raw **Ledger** lines. Rebuilds with
+`npm run books:reports:apply` (reports only) or the next full
+`npm run books:sync:apply`.
 
 ### Monthly P&L
 

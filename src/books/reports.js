@@ -79,7 +79,72 @@ function makeMonth(month) {
     cogs: 0, deliveryExp: 0, otherExp: 0, units: 0, orders: new Set(),
     courierOrders: new Set(), taxableRevenue: 0, untrackedRevenue: 0,
     expenseByCategory: {},
+    giftEntries: 0, giftUnits: 0, giftCogs: 0,
   };
+}
+
+const MONTH_DETAIL_HEADERS = [
+  "Month",
+  "Year",
+  "Block",
+  "Line",
+  "Gross collected",
+  "Output tax",
+  "Revenue ex-tax",
+  "Refunds",
+  "Net revenue",
+  "COGS",
+  "Gross profit",
+  "Gross margin %",
+  "Delivery expense",
+  "Other opex",
+  "Net profit",
+  "Net margin %",
+  "Orders / entries",
+  "Units",
+  "Mix %",
+  "Notes",
+];
+
+const MONTH_DETAIL_BLOCKS = {
+  pnl: "01 · P&L",
+  channel: "02 · Channel",
+  tax: "03 · Tax",
+  route: "04 · Shopify route",
+  gift: "05 · Gift & PR",
+  expense: "06 · Expenses",
+  topShopify: "07 · Top Shopify",
+  topManual: "08 · Top Manual",
+  topOther: "09 · Top Other Sales",
+};
+
+function isGiftCogsNotes(notes) {
+  return /gift\s*\/?\s*pr|delivery:gift|wa:gift|wa:pr/i.test(String(notes || ""));
+}
+
+function emptyMonthDetailRow(month, year, block, line, notes = "") {
+  return [
+    month,
+    year,
+    block,
+    line,
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    notes,
+  ];
 }
 
 function finalizeMonth(month) {
@@ -251,15 +316,27 @@ function rollupLedger(rows, header, catalogBySku = {}) {
       const itemLabel = catalog.product
         ? `${catalog.product} (${sku})`
         : cleanProductName(description) || sku || "Unknown";
+      const itemKey = sku || itemLabel;
       addCogsToBucket(
         ensureSalesBucket(channelStats, channel, month),
-        sku || itemLabel,
+        itemKey,
         itemLabel,
         debit
       );
+      if (isGiftCogsNotes(notes)) {
+        bucket.giftCogs += debit;
+        addCogsToBucket(
+          ensureSalesBucket(deliveryRouteStats, "Gift / PR", month),
+          itemKey,
+          itemLabel,
+          debit
+        );
+      }
     } else if (type === "gift") {
       // Gift / PR: stock out with no revenue (COGS still booked as COGS rows)
       bucket.units += qty;
+      bucket.giftEntries += 1;
+      bucket.giftUnits += qty;
       const product = ensureProduct(productStats, sku, description, catalogBySku);
       ensureProductMonth(product, month).units += qty;
       const orderKey = orderKeyFromRef(ref);
@@ -676,8 +753,367 @@ function buildAnalyticsValues(rollup, pipeline) {
   return rows;
 }
 
+function buildMonthDetailValues(rollup) {
+  const monthly = rollup.monthly || [];
+  const rows = [
+    ["MONTH DETAIL — OPERATING VIEW"],
+    [
+      "Showing the latest month by default • Use the Month filter in A5 to switch periods",
+    ],
+    [
+      "Start with P&L, then scan channels, expenses and top products • Blank cells mean not applicable",
+    ],
+    [
+      "CONTEXT",
+      "",
+      "",
+      "",
+      "SALES & GROSS PROFIT · PKR",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "OPERATING PROFIT · PKR",
+      "",
+      "",
+      "",
+      "ACTIVITY",
+      "",
+      "",
+      "NOTES",
+    ],
+    MONTH_DETAIL_HEADERS,
+  ];
+
+  for (const month of monthly) {
+    const year = Number(String(month.month).slice(0, 4));
+    const monthKeys = [month.month];
+    const channels = aggregateSalesStats(rollup.channelStats, monthKeys);
+    const routes = aggregateSalesStats(rollup.deliveryRouteStats, monthKeys);
+    const monthIndex = monthly.indexOf(month);
+    const prior = monthIndex > 0 ? monthly[monthIndex - 1] : null;
+    const revenueDelta = prior ? month.netRevenue - prior.netRevenue : null;
+
+    rows.push([
+      month.month,
+      year,
+      MONTH_DETAIL_BLOCKS.pnl,
+      "Month summary",
+      round2(month.grossCollected),
+      round2(month.outputTax),
+      round2(month.revenueExTax),
+      round2(month.refunds),
+      round2(month.netRevenue),
+      round2(month.cogs),
+      round2(month.grossProfit),
+      month.grossMargin,
+      round2(month.deliveryExp),
+      round2(month.otherExp),
+      round2(month.netProfit),
+      month.netMargin,
+      month.orderCount,
+      round2(month.units),
+      "",
+      revenueDelta == null
+        ? "Operating snapshot for the month"
+        : `Net revenue MoM ${revenueDelta >= 0 ? "+" : ""}${round2(revenueDelta)}`,
+    ]);
+
+    for (const channel of ["Shopify", "Manual", "Other Sales"]) {
+      const value = channels[channel] || {};
+      const count =
+        channel === "Shopify" ? value.orders || 0 : value.transactions || 0;
+      rows.push([
+        month.month,
+        year,
+        MONTH_DETAIL_BLOCKS.channel,
+        channel,
+        round2(value.grossCollected || 0),
+        round2(value.tax || 0),
+        round2(value.revenue || 0),
+        "",
+        "",
+        round2(value.cogs || 0),
+        round2(value.grossProfit || 0),
+        value.grossMargin || 0,
+        "",
+        "",
+        "",
+        "",
+        count,
+        round2(value.units || 0),
+        pct(value.revenue || 0, month.revenueExTax),
+        channel === "Shopify"
+          ? "Orders = distinct Shopify order refs"
+          : "Entries = Ledger sale rows",
+      ]);
+    }
+
+    const taxableBase = month.taxableRevenue + month.untrackedRevenue;
+    rows.push(
+      [
+        month.month,
+        year,
+        MONTH_DETAIL_BLOCKS.tax,
+        "Output tax accrued",
+        "",
+        round2(month.outputTax),
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "Tax-aware Ledger Tax rows only",
+      ],
+      [
+        month.month,
+        year,
+        MONTH_DETAIL_BLOCKS.tax,
+        "Taxable revenue ex-tax",
+        "",
+        "",
+        round2(month.taxableRevenue),
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        pct(month.taxableRevenue, taxableBase),
+        "Sale has matching Tax row",
+      ],
+      [
+        month.month,
+        year,
+        MONTH_DETAIL_BLOCKS.tax,
+        "Exempt / legacy-untracked revenue",
+        "",
+        "",
+        round2(month.untrackedRevenue),
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        pct(month.untrackedRevenue, taxableBase),
+        "Includes walk-in/self/gift and older gross-booked history",
+      ]
+    );
+
+    const routeRevenueTotal = sum(
+      ["Courier", "Booked ourselves", "Gift / PR", "Legacy / unclassified"].map(
+        (route) => routes[route]?.revenue || 0
+      ),
+      (v) => v
+    );
+    for (const route of [
+      "Courier",
+      "Booked ourselves",
+      "Gift / PR",
+      "Legacy / unclassified",
+    ]) {
+      const value = routes[route] || {};
+      rows.push([
+        month.month,
+        year,
+        MONTH_DETAIL_BLOCKS.route,
+        route,
+        "",
+        "",
+        round2(value.revenue || 0),
+        "",
+        "",
+        round2(value.cogs || 0),
+        round2((value.revenue || 0) - (value.cogs || 0)),
+        pct((value.revenue || 0) - (value.cogs || 0), value.revenue || 0),
+        "",
+        "",
+        "",
+        "",
+        value.orders || 0,
+        round2(value.units || 0),
+        pct(value.revenue || 0, routeRevenueTotal || month.revenueExTax),
+        route === "Gift / PR"
+          ? "No customer revenue; COGS still hits the month"
+          : route === "Legacy / unclassified"
+            ? "Older Shopify posts without delivery:* notes"
+            : "From delivery:* on Shopify Ledger notes",
+      ]);
+    }
+
+    rows.push(
+      [
+        month.month,
+        year,
+        MONTH_DETAIL_BLOCKS.gift,
+        "Gift / PR entries",
+        "",
+        "",
+        0,
+        "",
+        0,
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        month.giftEntries || 0,
+        round2(month.giftUnits || 0),
+        "",
+        "Ledger Entry Type = Gift (Rs 0 revenue)",
+      ],
+      [
+        month.month,
+        year,
+        MONTH_DETAIL_BLOCKS.gift,
+        "Gift / PR COGS",
+        "",
+        "",
+        "",
+        "",
+        "",
+        round2(month.giftCogs || 0),
+        round2(-(month.giftCogs || 0)),
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        pct(month.giftCogs || 0, month.cogs || 0),
+        "Included in month COGS — deepens loss without revenue",
+      ]
+    );
+
+    const expenses = Object.entries(month.expenseByCategory || {}).sort(
+      (a, b) => b[1] - a[1]
+    );
+    if (!expenses.length) {
+      rows.push(
+        emptyMonthDetailRow(
+          month.month,
+          year,
+          MONTH_DETAIL_BLOCKS.expense,
+          "No expenses posted",
+          "Add Expense rows in Ledger (or post from Recurring Expenses)"
+        )
+      );
+    } else {
+      for (const [category, amount] of expenses) {
+        const isDelivery = category.toLowerCase() === "delivery";
+        rows.push([
+          month.month,
+          year,
+          MONTH_DETAIL_BLOCKS.expense,
+          category,
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          isDelivery ? round2(amount) : "",
+          isDelivery ? "" : round2(amount),
+          "",
+          "",
+          "",
+          "",
+          pct(amount, month.totalOpex),
+          isDelivery
+            ? "Courier / logistics spend"
+            : "Ads, ops, and other operating spend",
+        ]);
+      }
+    }
+
+    const topSpecs = [
+      ["Shopify", MONTH_DETAIL_BLOCKS.topShopify],
+      ["Manual", MONTH_DETAIL_BLOCKS.topManual],
+      ["Other Sales", MONTH_DETAIL_BLOCKS.topOther],
+    ];
+    for (const [channel, block] of topSpecs) {
+      const items = (channels[channel]?.items || []).slice(0, 5);
+      if (!items.length) {
+        rows.push(
+          emptyMonthDetailRow(
+            month.month,
+            year,
+            block,
+            "No items",
+            `No ${channel} sales booked this month`
+          )
+        );
+        continue;
+      }
+      for (const [index, item] of items.entries()) {
+        rows.push([
+          month.month,
+          year,
+          block,
+          `${index + 1}. ${item.label}`,
+          "",
+          "",
+          round2(item.revenue),
+          "",
+          "",
+          round2(item.cogs),
+          round2(item.grossProfit),
+          item.grossMargin,
+          "",
+          "",
+          "",
+          "",
+          "",
+          round2(item.units),
+          pct(item.revenue, channels[channel]?.revenue || 0),
+          "Top items by revenue ex-tax",
+        ]);
+      }
+    }
+  }
+
+  return rows;
+}
+
 module.exports = {
-  PNL_HEADERS, rollupLedger, buildDashboardValues, buildAnalyticsValues,
+  PNL_HEADERS,
+  MONTH_DETAIL_HEADERS,
+  MONTH_DETAIL_BLOCKS,
+  rollupLedger,
+  buildDashboardValues,
+  buildAnalyticsValues,
   buildChannelAnalyticsValues,
-  monthKey, orderKeyFromRef, saleUid, saleChannel, periodSummary,
+  buildMonthDetailValues,
+  monthKey,
+  orderKeyFromRef,
+  saleUid,
+  saleChannel,
+  periodSummary,
 };

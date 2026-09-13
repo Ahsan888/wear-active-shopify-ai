@@ -12,10 +12,12 @@ const { parseMoney, splitInclusiveTax, isTaxChargeableFlag, dateKey } = require(
 const { isRecognized } = require("../books/recognition");
 const {
   PNL_HEADERS,
+  MONTH_DETAIL_HEADERS,
   rollupLedger,
   buildDashboardValues,
   buildAnalyticsValues,
   buildChannelAnalyticsValues,
+  buildMonthDetailValues,
 } = require("../books/reports");
 
 const CHANNEL_REPORTS = [
@@ -23,6 +25,7 @@ const CHANNEL_REPORTS = [
   { title: "Manual Analytics", channel: "Manual" },
   { title: "Other Sales Analytics", channel: "Other Sales" },
 ];
+const MONTH_DETAIL_TITLE = "Month Detail";
 
 /**
  * Post / tax-backfill Other Sales using Tax Chargeable.
@@ -330,6 +333,39 @@ function repeatFormat(sheetId, rowStart, rowEnd, colStart, colEnd, format) {
   };
 }
 
+function overlayFormat(sheetId, rowStart, rowEnd, colStart, colEnd, format) {
+  const fields = Object.keys(format)
+    .map((key) => `userEnteredFormat.${key}`)
+    .join(",");
+  return {
+    repeatCell: {
+      range: {
+        sheetId,
+        startRowIndex: rowStart,
+        endRowIndex: rowEnd,
+        startColumnIndex: colStart,
+        endColumnIndex: colEnd,
+      },
+      cell: { userEnteredFormat: format },
+      fields,
+    },
+  };
+}
+
+function overlayNumberFormat(
+  sheetId,
+  rowStart,
+  rowEnd,
+  colStart,
+  colEnd,
+  pattern,
+  type = "NUMBER"
+) {
+  return overlayFormat(sheetId, rowStart, rowEnd, colStart, colEnd, {
+    numberFormat: { type, pattern },
+  });
+}
+
 function numberFormat(sheetId, rowStart, rowEnd, colStart, colEnd, pattern, type = "NUMBER") {
   return repeatFormat(sheetId, rowStart, rowEnd, colStart, colEnd, {
     numberFormat: { type, pattern },
@@ -363,15 +399,18 @@ async function formatReports(
   dashValues,
   analyticsValues,
   pnlRowCount,
-  channelReportValues
+  channelReportValues,
+  monthDetailValues
 ) {
   const byTitle = (title) => meta.data.sheets.find((s) => s.properties.title === title);
   const dashSheet = byTitle("Dashboard");
   const pnlSheet = byTitle("Monthly P&L");
   const analyticsSheet = byTitle("Analytics");
+  const monthDetailSheet = byTitle(MONTH_DETAIL_TITLE);
   const dashId = dashSheet?.properties.sheetId;
   const pnlId = pnlSheet?.properties.sheetId;
   const analyticsId = analyticsSheet?.properties.sheetId;
+  const monthDetailId = monthDetailSheet?.properties.sheetId;
   const channelSheets = CHANNEL_REPORTS.map(({ title, channel }) => ({
     title,
     channel,
@@ -402,6 +441,7 @@ async function formatReports(
     dashSheet,
     pnlSheet,
     analyticsSheet,
+    monthDetailSheet,
     ...channelSheets.map((report) => report.sheet),
   ].filter(Boolean)) {
     const sheetId = sheet.properties.sheetId;
@@ -682,17 +722,551 @@ async function formatReports(
     }
   }
 
+  if (monthDetailId != null && Array.isArray(monthDetailValues) && monthDetailValues.length) {
+    const headerRow = monthDetailValues.findIndex(
+      (row) => row[0] === "Month" && row[2] === "Block"
+    );
+    const colCount = MONTH_DETAIL_HEADERS.length;
+    const dataStart = headerRow >= 0 ? headerRow + 1 : 5;
+    const dataEnd = monthDetailValues.length;
+    const groupRow = Math.max(0, headerRow - 1);
+    const latestMonth = monthDetailValues
+      .slice(dataStart)
+      .map((row) => String(row[0] || ""))
+      .filter(Boolean)
+      .sort()
+      .at(-1);
+    const monthMoney = "#,##0;[Red](#,##0);–";
+    const monthPercent = "0.0%;[Red](0.0%);–";
+    const monthCount = "#,##0;[Red](#,##0);–";
+    const divider = { red: 0.78, green: 0.82, blue: 0.84 };
+    const bodyFormat = {
+      backgroundColor: { red: 1, green: 1, blue: 1 },
+      textFormat: {
+        fontSize: 10,
+        foregroundColor: { red: 0.16, green: 0.2, blue: 0.22 },
+      },
+      verticalAlignment: "MIDDLE",
+      wrapStrategy: "CLIP",
+      borders: {
+        bottom: { style: "SOLID", color: { red: 0.91, green: 0.92, blue: 0.93 } },
+      },
+    };
+    const subtitleFormat = {
+      backgroundColor: { red: 0.95, green: 0.97, blue: 0.96 },
+      textFormat: {
+        fontSize: 10,
+        foregroundColor: { red: 0.28, green: 0.35, blue: 0.33 },
+      },
+      wrapStrategy: "WRAP",
+      verticalAlignment: "MIDDLE",
+    };
+    const groupFormat = {
+      backgroundColor: { red: 0.84, green: 0.89, blue: 0.87 },
+      textFormat: {
+        bold: true,
+        fontSize: 9,
+        foregroundColor: { red: 0.08, green: 0.24, blue: 0.2 },
+      },
+      horizontalAlignment: "CENTER",
+      verticalAlignment: "MIDDLE",
+    };
+    const blockColors = {
+      "01 · P&L": { red: 0.93, green: 0.87, blue: 0.73 },
+      "02 · Channel": { red: 0.8, green: 0.88, blue: 0.94 },
+      "03 · Tax": { red: 0.88, green: 0.84, blue: 0.93 },
+      "04 · Shopify route": { red: 0.78, green: 0.9, blue: 0.86 },
+      "05 · Gift & PR": { red: 0.94, green: 0.82, blue: 0.84 },
+      "06 · Expenses": { red: 0.94, green: 0.87, blue: 0.76 },
+      "07 · Top Shopify": { red: 0.84, green: 0.91, blue: 0.82 },
+      "08 · Top Manual": { red: 0.84, green: 0.91, blue: 0.82 },
+      "09 · Top Other Sales": { red: 0.84, green: 0.91, blue: 0.82 },
+    };
+    const pnlRowFormat = {
+      backgroundColor: { red: 0.16, green: 0.28, blue: 0.38 },
+      textFormat: {
+        bold: true,
+        foregroundColor: { red: 1, green: 1, blue: 1 },
+      },
+    };
+
+    const existingRules = monthDetailSheet?.conditionalFormats || [];
+    for (let i = existingRules.length - 1; i >= 0; i--) {
+      requests.push({
+        deleteConditionalFormatRule: { sheetId: monthDetailId, index: i },
+      });
+    }
+    requests.push({
+      unmergeCells: {
+        range: {
+          sheetId: monthDetailId,
+          startRowIndex: 0,
+          endRowIndex: Math.max(dataEnd, 5),
+          startColumnIndex: 0,
+          endColumnIndex: colCount,
+        },
+      },
+    });
+    requests.push(
+      repeatFormat(
+        monthDetailId,
+        0,
+        Math.max(dataEnd, 300),
+        0,
+        colCount,
+        {}
+      )
+    );
+
+    requests.push(
+      {
+        updateSheetProperties: {
+          properties: {
+            sheetId: monthDetailId,
+            tabColorStyle: {
+              rgbColor: { red: 0.12, green: 0.33, blue: 0.42 },
+            },
+            gridProperties: {
+              frozenRowCount: 0,
+              frozenColumnCount: 0,
+              hideGridlines: true,
+            },
+          },
+          fields:
+            "tabColorStyle,gridProperties.frozenRowCount,gridProperties.frozenColumnCount,gridProperties.hideGridlines",
+        },
+      },
+      {
+        mergeCells: {
+          range: {
+            sheetId: monthDetailId,
+            startRowIndex: 0,
+            endRowIndex: 1,
+            startColumnIndex: 0,
+            endColumnIndex: 4,
+          },
+          mergeType: "MERGE_ALL",
+        },
+      },
+      {
+        mergeCells: {
+          range: {
+            sheetId: monthDetailId,
+            startRowIndex: 1,
+            endRowIndex: 2,
+            startColumnIndex: 0,
+            endColumnIndex: 4,
+          },
+          mergeType: "MERGE_ALL",
+        },
+      },
+      {
+        mergeCells: {
+          range: {
+            sheetId: monthDetailId,
+            startRowIndex: 2,
+            endRowIndex: 3,
+            startColumnIndex: 0,
+            endColumnIndex: 4,
+          },
+          mergeType: "MERGE_ALL",
+        },
+      },
+      {
+        mergeCells: {
+          range: {
+            sheetId: monthDetailId,
+            startRowIndex: groupRow,
+            endRowIndex: groupRow + 1,
+            startColumnIndex: 0,
+            endColumnIndex: 4,
+          },
+          mergeType: "MERGE_ALL",
+        },
+      },
+      {
+        mergeCells: {
+          range: {
+            sheetId: monthDetailId,
+            startRowIndex: groupRow,
+            endRowIndex: groupRow + 1,
+            startColumnIndex: 4,
+            endColumnIndex: 12,
+          },
+          mergeType: "MERGE_ALL",
+        },
+      },
+      {
+        mergeCells: {
+          range: {
+            sheetId: monthDetailId,
+            startRowIndex: groupRow,
+            endRowIndex: groupRow + 1,
+            startColumnIndex: 12,
+            endColumnIndex: 16,
+          },
+          mergeType: "MERGE_ALL",
+        },
+      },
+      {
+        mergeCells: {
+          range: {
+            sheetId: monthDetailId,
+            startRowIndex: groupRow,
+            endRowIndex: groupRow + 1,
+            startColumnIndex: 16,
+            endColumnIndex: 19,
+          },
+          mergeType: "MERGE_ALL",
+        },
+      },
+      repeatFormat(monthDetailId, 0, 1, 0, colCount, {
+        ...titleFormat,
+        horizontalAlignment: "LEFT",
+      }),
+      repeatFormat(monthDetailId, 1, 3, 0, colCount, subtitleFormat),
+      repeatFormat(monthDetailId, groupRow, groupRow + 1, 0, colCount, groupFormat),
+      {
+        updateSheetProperties: {
+          properties: {
+            sheetId: monthDetailId,
+            gridProperties: {
+              frozenRowCount: headerRow >= 0 ? headerRow + 1 : 5,
+              frozenColumnCount: 4,
+            },
+          },
+          fields:
+            "gridProperties.frozenRowCount,gridProperties.frozenColumnCount",
+        },
+      },
+      {
+        updateDimensionProperties: {
+          range: {
+            sheetId: monthDetailId,
+            dimension: "ROWS",
+            startIndex: 0,
+            endIndex: 1,
+          },
+          properties: { pixelSize: 42 },
+          fields: "pixelSize",
+        },
+      },
+      {
+        updateDimensionProperties: {
+          range: {
+            sheetId: monthDetailId,
+            dimension: "ROWS",
+            startIndex: dataStart,
+            endIndex: dataEnd,
+          },
+          properties: { pixelSize: 36 },
+          fields: "pixelSize",
+        },
+      },
+      {
+        updateDimensionProperties: {
+          range: {
+            sheetId: monthDetailId,
+            dimension: "ROWS",
+            startIndex: 1,
+            endIndex: 3,
+          },
+          properties: { pixelSize: 34 },
+          fields: "pixelSize",
+        },
+      },
+      {
+        updateDimensionProperties: {
+          range: {
+            sheetId: monthDetailId,
+            dimension: "ROWS",
+            startIndex: groupRow,
+            endIndex: groupRow + 1,
+          },
+          properties: { pixelSize: 26 },
+          fields: "pixelSize",
+        },
+      },
+      {
+        updateDimensionProperties: {
+          range: {
+            sheetId: monthDetailId,
+            dimension: "COLUMNS",
+            startIndex: 1,
+            endIndex: 2,
+          },
+          properties: { hiddenByUser: true },
+          fields: "hiddenByUser",
+        },
+      },
+      dimensionWidth(monthDetailId, 0, 1, 92),
+      dimensionWidth(monthDetailId, 2, 3, 132),
+      dimensionWidth(monthDetailId, 3, 4, 218),
+      dimensionWidth(monthDetailId, 4, 11, 108),
+      dimensionWidth(monthDetailId, 11, 12, 96),
+      dimensionWidth(monthDetailId, 12, 15, 108),
+      dimensionWidth(monthDetailId, 15, 16, 96),
+      dimensionWidth(monthDetailId, 16, 18, 100),
+      dimensionWidth(monthDetailId, 18, 19, 82),
+      dimensionWidth(monthDetailId, 19, 20, 285)
+    );
+
+    if (headerRow >= 0) {
+      requests.push(
+        repeatFormat(monthDetailId, headerRow, headerRow + 1, 0, colCount, {
+          ...headerFormat,
+          backgroundColor: { red: 0.12, green: 0.33, blue: 0.42 },
+          textFormat: {
+            bold: true,
+            foregroundColor: { red: 1, green: 1, blue: 1 },
+            fontSize: 10,
+          },
+          horizontalAlignment: "CENTER",
+        }),
+        {
+          updateDimensionProperties: {
+            range: {
+              sheetId: monthDetailId,
+              dimension: "ROWS",
+              startIndex: headerRow,
+              endIndex: headerRow + 1,
+            },
+            properties: { pixelSize: 44 },
+            fields: "pixelSize",
+          },
+        },
+        {
+          setBasicFilter: {
+            filter: {
+              range: {
+                sheetId: monthDetailId,
+                startRowIndex: headerRow,
+                endRowIndex: dataEnd,
+                startColumnIndex: 0,
+                endColumnIndex: colCount,
+              },
+              ...(latestMonth
+                ? {
+                    criteria: {
+                      0: {
+                        condition: {
+                          type: "TEXT_EQ",
+                          values: [{ userEnteredValue: latestMonth }],
+                        },
+                      },
+                    },
+                  }
+                : {}),
+            },
+          },
+        }
+      );
+    }
+
+    if (dataEnd > dataStart) {
+      requests.push(
+        repeatFormat(monthDetailId, dataStart, dataEnd, 0, colCount, bodyFormat),
+        overlayFormat(monthDetailId, dataStart, dataEnd, 0, 1, {
+          textFormat: {
+            bold: true,
+            fontSize: 10,
+            foregroundColor: { red: 0.12, green: 0.31, blue: 0.27 },
+          },
+        }),
+        overlayFormat(monthDetailId, dataStart, dataEnd, 3, 4, {
+          textFormat: {
+            bold: true,
+            fontSize: 10,
+            foregroundColor: { red: 0.14, green: 0.18, blue: 0.2 },
+          },
+          wrapStrategy: "WRAP",
+        }),
+        overlayFormat(monthDetailId, dataStart, dataEnd, 4, 19, {
+          horizontalAlignment: "RIGHT",
+        }),
+        overlayNumberFormat(monthDetailId, dataStart, dataEnd, 1, 2, "0"),
+        overlayNumberFormat(monthDetailId, dataStart, dataEnd, 4, 11, monthMoney),
+        overlayNumberFormat(
+          monthDetailId,
+          dataStart,
+          dataEnd,
+          11,
+          12,
+          monthPercent,
+          "PERCENT"
+        ),
+        overlayNumberFormat(monthDetailId, dataStart, dataEnd, 12, 15, monthMoney),
+        overlayNumberFormat(
+          monthDetailId,
+          dataStart,
+          dataEnd,
+          15,
+          16,
+          monthPercent,
+          "PERCENT"
+        ),
+        overlayNumberFormat(monthDetailId, dataStart, dataEnd, 16, 18, monthCount),
+        overlayNumberFormat(
+          monthDetailId,
+          dataStart,
+          dataEnd,
+          18,
+          19,
+          monthPercent,
+          "PERCENT"
+        ),
+        overlayFormat(monthDetailId, dataStart, dataEnd, 19, 20, {
+          textFormat: {
+            italic: true,
+            fontSize: 9,
+            foregroundColor: { red: 0.35, green: 0.38, blue: 0.42 },
+          },
+          wrapStrategy: "WRAP",
+        }),
+        {
+          addConditionalFormatRule: {
+            rule: {
+              ranges: [
+                {
+                  sheetId: monthDetailId,
+                  startRowIndex: dataStart,
+                  endRowIndex: dataEnd,
+                  startColumnIndex: 14,
+                  endColumnIndex: 16,
+                },
+              ],
+              booleanRule: {
+                condition: {
+                  type: "NUMBER_LESS",
+                  values: [{ userEnteredValue: "0" }],
+                },
+                format: {
+                  backgroundColor: { red: 0.96, green: 0.8, blue: 0.8 },
+                  textFormat: {
+                    foregroundColor: { red: 0.55, green: 0.05, blue: 0.05 },
+                    bold: true,
+                  },
+                },
+              },
+            },
+            index: 0,
+          },
+        },
+        {
+          addConditionalFormatRule: {
+            rule: {
+              ranges: [
+                {
+                  sheetId: monthDetailId,
+                  startRowIndex: dataStart,
+                  endRowIndex: dataEnd,
+                  startColumnIndex: 14,
+                  endColumnIndex: 16,
+                },
+              ],
+              booleanRule: {
+                condition: {
+                  type: "NUMBER_GREATER",
+                  values: [{ userEnteredValue: "0" }],
+                },
+                format: {
+                  backgroundColor: { red: 0.82, green: 0.93, blue: 0.84 },
+                  textFormat: {
+                    foregroundColor: { red: 0.08, green: 0.35, blue: 0.18 },
+                    bold: true,
+                  },
+                },
+              },
+            },
+            index: 1,
+          },
+        }
+      );
+
+      let bandStart = dataStart;
+      while (bandStart < dataEnd) {
+        const block = String(monthDetailValues[bandStart]?.[2] || "");
+        let bandEnd = bandStart + 1;
+        while (
+          bandEnd < dataEnd &&
+          String(monthDetailValues[bandEnd]?.[2] || "") === block
+        ) {
+          bandEnd++;
+        }
+        const color = blockColors[block];
+        if (color) {
+          requests.push(
+            overlayFormat(monthDetailId, bandStart, bandEnd, 2, 3, {
+              backgroundColor: color,
+              textFormat: {
+                bold: true,
+                fontSize: 9,
+                foregroundColor: { red: 0.1, green: 0.2, blue: 0.18 },
+              },
+              verticalAlignment: "MIDDLE",
+            }),
+            overlayFormat(monthDetailId, bandStart, bandStart + 1, 0, colCount, {
+              borders: {
+                top: { style: "SOLID_MEDIUM", color: divider },
+                bottom: {
+                  style: "SOLID",
+                  color: { red: 0.91, green: 0.92, blue: 0.93 },
+                },
+              },
+            })
+          );
+        }
+        bandStart = bandEnd;
+      }
+
+      for (let row = dataStart; row < dataEnd; row++) {
+        const block = String(monthDetailValues[row]?.[2] || "");
+        const line = String(monthDetailValues[row]?.[3] || "");
+        if (block === "01 · P&L" && line === "Month summary") {
+          requests.push(
+            overlayFormat(monthDetailId, row, row + 1, 0, colCount, pnlRowFormat)
+          );
+        }
+      }
+    }
+  }
+
   if (requests.length) {
     await sheets.spreadsheets.batchUpdate({ spreadsheetId, requestBody: { requests } });
   }
 }
 
-async function main() {
-  const apply = process.argv.includes("--apply");
-  const skipShopify = process.argv.includes("--skip-shopify");
-  console.log(
-    `Mode: ${apply ? "APPLY" : "DRY-RUN"}${skipShopify ? " (skip Shopify)" : ""}`
+function parseExcludeOrders(argv) {
+  const flag = argv.find((a) => a.startsWith("--exclude-orders="));
+  if (!flag) return new Set();
+  return new Set(
+    flag
+      .slice("--exclude-orders=".length)
+      .split(",")
+      .map((s) => String(s || "").trim().replace(/^#/, ""))
+      .filter(Boolean)
   );
+}
+
+function normalizeOrderNumber(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^#/, "");
+}
+
+async function main() {
+  const reportsOnly = process.argv.includes("--reports-only");
+  const apply = process.argv.includes("--apply") && !reportsOnly;
+  const skipShopify = process.argv.includes("--skip-shopify");
+  const excludeOrders = parseExcludeOrders(process.argv);
+  console.log(
+    `Mode: ${reportsOnly ? "REPORTS-ONLY" : apply ? "APPLY" : "DRY-RUN"}${skipShopify ? " (skip Shopify)" : ""}`
+  );
+  if (excludeOrders.size) {
+    console.log(
+      `Excluding orders from Ledger post: ${[...excludeOrders].join(", ")}`
+    );
+  }
 
   const sheets = await getSheetsClient();
   const spreadsheetId = requireSpreadsheetId();
@@ -743,11 +1317,29 @@ async function main() {
     orderMeta = await fetchOrderMetaByIds(orderIds);
   }
 
-  const { writes: enrichWrites } = enrichLiveRows(
+  const { writes: enrichWritesBase } = enrichLiveRows(
     header,
     dataRows,
     orderMeta
   );
+  const enrichWrites = [...enrichWritesBase];
+
+  // Force excluded orders to stay unposted (sheet + ledger)
+  if (excludeOrders.size && iRec >= 0) {
+    for (let i = 0; i < dataRows.length; i++) {
+      const order = normalizeOrderNumber(dataRows[i][iOrder]);
+      if (!order || !excludeOrders.has(order)) continue;
+      dataRows[i][iRec] = "N";
+      dataRows[i].__meta = {
+        ...(dataRows[i].__meta || {}),
+        rec: { recognized: false, reason: "exclude_orders" },
+      };
+      enrichWrites.push({
+        range: `'Shopify Orders (LIVE)'!${colLetter(iRec + 1)}${i + 2}`,
+        values: [["N"]],
+      });
+    }
+  }
 
   const ledger = ledgerRes.data.values || [];
   const lHead = ledger[0].map(String);
@@ -787,11 +1379,23 @@ async function main() {
   let skippedUnrec = 0;
   let skippedPosted = 0;
   let skippedNoNet = 0;
+  let skippedExcluded = 0;
 
   for (const r of dataRows) {
     const uid = String(r[iUid] || "").trim();
     if (!uid) continue;
     const meta = r.__meta;
+    const order = normalizeOrderNumber(r[iOrder]);
+    if (excludeOrders.has(order)) {
+      skippedExcluded++;
+      if (!existing.has(`SALE:${uid}`) && !existing.has(`GIFT:${uid}`)) {
+        openPipelineLines++;
+        pipeline.orders.add(order);
+        pipeline.gross += parseMoney(r[iNet]);
+        pipeline.units += parseMoney(r[iQty]);
+      }
+      continue;
+    }
     const rec = meta?.rec || isRecognized({
       fulfillmentStatus: r[iFul],
       paymentStatus: r[iPay],
@@ -801,7 +1405,6 @@ async function main() {
 
     const gross = parseMoney(r[iNet]);
     const qty = parseMoney(r[iQty]);
-    const order = String(r[iOrder] || "").replace(/^#/, "");
 
     const saleRef = `SALE:${uid}`;
     if (!rec.recognized) {
@@ -933,7 +1536,7 @@ async function main() {
   };
 
   console.log(
-    `Post candidates: ${out.length} ledger rows | unrec ${skippedUnrec} | already ${skippedPosted} | noNet ${skippedNoNet}`
+    `Post candidates: ${out.length} ledger rows | unrec ${skippedUnrec} | already ${skippedPosted} | noNet ${skippedNoNet} | excluded ${skippedExcluded}`
   );
   console.log("Pipeline:", pipelineSummary);
 
@@ -953,24 +1556,53 @@ async function main() {
     `Other Sales: +${otherSales.summary.newRows} ledger rows (tax backfill ${otherSales.summary.taxBackfill}, sale credit fixes ${otherSales.summary.saleFixes})`
   );
 
+  // Meta Ads → Recurring Expenses + Ledger (monthly upsert; soft-skip if no credentials)
+  let metaExpenses = null;
+  const {
+    runMetaExpensesSync,
+    printPlan,
+  } = require("./meta-expenses-sync");
+  const { applyPlanToPreviewLedger } = require("../books/meta-expenses");
+  try {
+    metaExpenses = await runMetaExpensesSync({
+      sheets,
+      spreadsheetId,
+      apply: false, // plan only here; write during apply below
+      months: 1,
+    });
+    if (!metaExpenses.skipped) {
+      printPlan(metaExpenses);
+    } else {
+      console.log(`Meta expenses skipped: ${metaExpenses.reason}`);
+    }
+  } catch (err) {
+    console.log(`Meta expenses skipped (error): ${err.message || err}`);
+    metaExpenses = { skipped: true, reason: "error", plan: null };
+  }
+
   // Rebuild reports from full ledger + new outs (apply in-memory sale credit fixes first)
   const previewLedger = ledger.slice(1).map((row) => [...row]);
   const iCreditCol = lHead.indexOf("Credit");
   const iNotesCol = lHead.indexOf("Notes");
-  for (const fix of otherSales.saleCreditFixes) {
-    const m = String(fix.range).match(/!([A-Z]+)(\d+)$/);
-    if (!m) continue;
-    const col = m[1];
-    const previewIdx = Number(m[2]) - 2;
-    if (previewIdx < 0 || previewIdx >= previewLedger.length) continue;
-    if (iCreditCol >= 0 && col === colLetter(iCreditCol + 1)) {
-      previewLedger[previewIdx][iCreditCol] = fix.values[0][0];
+  if (!reportsOnly) {
+    for (const fix of otherSales.saleCreditFixes) {
+      const m = String(fix.range).match(/!([A-Z]+)(\d+)$/);
+      if (!m) continue;
+      const col = m[1];
+      const previewIdx = Number(m[2]) - 2;
+      if (previewIdx < 0 || previewIdx >= previewLedger.length) continue;
+      if (iCreditCol >= 0 && col === colLetter(iCreditCol + 1)) {
+        previewLedger[previewIdx][iCreditCol] = fix.values[0][0];
+      }
+      if (iNotesCol >= 0 && col === colLetter(iNotesCol + 1)) {
+        previewLedger[previewIdx][iNotesCol] = fix.values[0][0];
+      }
     }
-    if (iNotesCol >= 0 && col === colLetter(iNotesCol + 1)) {
-      previewLedger[previewIdx][iNotesCol] = fix.values[0][0];
+    previewLedger.push(...out);
+    if (metaExpenses?.plan) {
+      applyPlanToPreviewLedger(previewLedger, lHead, metaExpenses.plan);
     }
   }
-  previewLedger.push(...out);
 
   const rollup = rollupLedger(previewLedger, lHead, catalogBySku);
   const alerts = [];
@@ -987,6 +1619,7 @@ async function main() {
     alerts
   );
   const analyticsValues = buildAnalyticsValues(rollup, pipelineSummary);
+  const monthDetailValues = buildMonthDetailValues(rollup);
   const channelReportValues = Object.fromEntries(
     CHANNEL_REPORTS.map(({ channel }) => [
       channel,
@@ -994,9 +1627,10 @@ async function main() {
     ])
   );
 
-  if (!apply) {
+  if (!apply && !reportsOnly) {
     console.log("Sample posts:", out.slice(0, 6));
     console.log(`Monthly P&L rows: ${rollup.monthlyRows.length}`);
+    console.log(`Month Detail rows: ${monthDetailValues.length}`);
     console.log(
       "Channel report rows:",
       Object.fromEntries(
@@ -1010,49 +1644,62 @@ async function main() {
     return;
   }
 
-  // Write enrich + posted flags
-  await batchWrite(sheets, spreadsheetId, [
-    ...enrichWrites,
-    ...postedWrites,
-    ...otherSales.saleCreditFixes,
-    ...otherSales.processedWrites,
-  ]);
-  console.log(
-    `Updated LIVE enrich cells: ${enrichWrites.length + postedWrites.length}; Other Sales fixes/processed: ${otherSales.saleCreditFixes.length + otherSales.processedWrites.length}`
-  );
+  if (apply) {
+    // Write enrich + posted flags only during a full accounting sync.
+    await batchWrite(sheets, spreadsheetId, [
+      ...enrichWrites,
+      ...postedWrites,
+      ...otherSales.saleCreditFixes,
+      ...otherSales.processedWrites,
+    ]);
+    console.log(
+      `Updated LIVE enrich cells: ${enrichWrites.length + postedWrites.length}; Other Sales fixes/processed: ${otherSales.saleCreditFixes.length + otherSales.processedWrites.length}`
+    );
 
-  if (out.length) {
-    await sheets.spreadsheets.values.append({
-      spreadsheetId,
-      range: "'Ledger'!A:N",
-      valueInputOption: "USER_ENTERED",
-      insertDataOption: "INSERT_ROWS",
-      requestBody: { values: out },
-    });
-    console.log(`Appended ${out.length} Ledger rows`);
+    if (out.length) {
+      await sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: "'Ledger'!A:N",
+        valueInputOption: "USER_ENTERED",
+        insertDataOption: "INSERT_ROWS",
+        requestBody: { values: out },
+      });
+      console.log(`Appended ${out.length} Ledger rows`);
 
-    // refresh Posted flags for newly posted
-    const morePosted = [];
-    for (let i = 0; i < dataRows.length; i++) {
-      const uid = String(dataRows[i][iUid] || "").trim();
-      if (
-        uid &&
-        (existing.has(`SALE:${uid}`) || existing.has(`GIFT:${uid}`)) &&
-        iPosted >= 0
-      ) {
-        morePosted.push({
-          range: `'Shopify Orders (LIVE)'!${colLetter(iPosted + 1)}${i + 2}`,
-          values: [["Y"]],
-        });
+      // refresh Posted flags for newly posted
+      const morePosted = [];
+      for (let i = 0; i < dataRows.length; i++) {
+        const uid = String(dataRows[i][iUid] || "").trim();
+        if (
+          uid &&
+          (existing.has(`SALE:${uid}`) || existing.has(`GIFT:${uid}`)) &&
+          iPosted >= 0
+        ) {
+          morePosted.push({
+            range: `'Shopify Orders (LIVE)'!${colLetter(iPosted + 1)}${i + 2}`,
+            values: [["Y"]],
+          });
+        }
       }
+      await batchWrite(sheets, spreadsheetId, morePosted);
     }
-    await batchWrite(sheets, spreadsheetId, morePosted);
+
+    if (metaExpenses?.plan && !metaExpenses.skipped) {
+      const written = await runMetaExpensesSync({
+        sheets,
+        spreadsheetId,
+        apply: true,
+        months: 1,
+      });
+      printPlan(written);
+      console.log("Synced Meta Ads into Recurring Expenses + Ledger.");
+    }
   }
 
   await ensureReportSheets(
     sheets,
     spreadsheetId,
-    CHANNEL_REPORTS.map((report) => report.title)
+    [MONTH_DETAIL_TITLE, ...CHANNEL_REPORTS.map((report) => report.title)]
   );
 
   // Clear & write reports (RAW so large numbers aren't parsed as dates)
@@ -1065,6 +1712,17 @@ async function main() {
     range: "'Monthly P&L'!A1",
     valueInputOption: "RAW",
     requestBody: { values: [PNL_HEADERS, ...rollup.monthlyRows] },
+  });
+
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId,
+    range: `'${MONTH_DETAIL_TITLE}'!A:Z`,
+  });
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `'${MONTH_DETAIL_TITLE}'!A1`,
+    valueInputOption: "RAW",
+    requestBody: { values: monthDetailValues },
   });
 
   await sheets.spreadsheets.values.clear({
@@ -1106,7 +1764,7 @@ async function main() {
   // Clear stale formats, apply readable report formatting, and delete Dashboard charts.
   const meta = await sheets.spreadsheets.get({
     spreadsheetId,
-    fields: "sheets(properties,charts)",
+    fields: "sheets(properties,charts,conditionalFormats)",
   });
   await formatReports(
     sheets,
@@ -1115,11 +1773,12 @@ async function main() {
     dashValues,
     analyticsValues,
     rollup.monthlyRows.length + 1,
-    channelReportValues
+    channelReportValues,
+    monthDetailValues
   );
 
   console.log(
-    "Rebuilt Dashboard, Monthly P&L, Analytics, and channel analytics."
+    "Rebuilt Dashboard, Month Detail, Monthly P&L, Analytics, and channel analytics."
   );
 }
 
