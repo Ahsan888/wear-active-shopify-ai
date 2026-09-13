@@ -724,12 +724,12 @@ async function formatReports(
 
   if (monthDetailId != null && Array.isArray(monthDetailValues) && monthDetailValues.length) {
     const headerRow = monthDetailValues.findIndex(
-      (row) => row[0] === "Month" && row[2] === "Block"
+      (row) => row[0] === "Month" && row[1] === "Step"
     );
     const colCount = MONTH_DETAIL_HEADERS.length;
-    const dataStart = headerRow >= 0 ? headerRow + 1 : 5;
+    const dataStart = headerRow >= 0 ? headerRow + 1 : 4;
     const dataEnd = monthDetailValues.length;
-    const groupRow = Math.max(0, headerRow - 1);
+    const firstDataSheetRow = dataStart + 1;
     const latestMonth = monthDetailValues
       .slice(dataStart)
       .map((row) => String(row[0] || ""))
@@ -738,7 +738,6 @@ async function formatReports(
       .at(-1);
     const monthMoney = "#,##0;[Red](#,##0);–";
     const monthPercent = "0.0%;[Red](0.0%);–";
-    const monthCount = "#,##0;[Red](#,##0);–";
     const divider = { red: 0.78, green: 0.82, blue: 0.84 };
     const bodyFormat = {
       backgroundColor: { red: 1, green: 1, blue: 1 },
@@ -761,26 +760,15 @@ async function formatReports(
       wrapStrategy: "WRAP",
       verticalAlignment: "MIDDLE",
     };
-    const groupFormat = {
-      backgroundColor: { red: 0.84, green: 0.89, blue: 0.87 },
-      textFormat: {
-        bold: true,
-        fontSize: 9,
-        foregroundColor: { red: 0.08, green: 0.24, blue: 0.2 },
-      },
-      horizontalAlignment: "CENTER",
-      verticalAlignment: "MIDDLE",
-    };
     const blockColors = {
-      "01 · P&L": { red: 0.93, green: 0.87, blue: 0.73 },
-      "02 · Channel": { red: 0.8, green: 0.88, blue: 0.94 },
-      "03 · Tax": { red: 0.88, green: 0.84, blue: 0.93 },
-      "04 · Shopify route": { red: 0.78, green: 0.9, blue: 0.86 },
-      "05 · Gift & PR": { red: 0.94, green: 0.82, blue: 0.84 },
-      "06 · Expenses": { red: 0.94, green: 0.87, blue: 0.76 },
-      "07 · Top Shopify": { red: 0.84, green: 0.91, blue: 0.82 },
-      "08 · Top Manual": { red: 0.84, green: 0.91, blue: 0.82 },
-      "09 · Top Other Sales": { red: 0.84, green: 0.91, blue: 0.82 },
+      "01 · Snapshot": { red: 0.8, green: 0.88, blue: 0.94 },
+      "02 · Profit story": { red: 0.93, green: 0.87, blue: 0.73 },
+      "03 · Revenue sources": { red: 0.78, green: 0.9, blue: 0.86 },
+      "04 · Shopify operations": { red: 0.84, green: 0.9, blue: 0.94 },
+      "05 · Tax & expenses": { red: 0.88, green: 0.84, blue: 0.93 },
+      "06 · Gift & PR": { red: 0.94, green: 0.82, blue: 0.84 },
+      "07 · Best products": { red: 0.84, green: 0.91, blue: 0.82 },
+      "08 · Decision cues": { red: 0.83, green: 0.88, blue: 0.76 },
     };
     const pnlRowFormat = {
       backgroundColor: { red: 0.16, green: 0.28, blue: 0.38 },
@@ -803,7 +791,7 @@ async function formatReports(
           startRowIndex: 0,
           endRowIndex: Math.max(dataEnd, 5),
           startColumnIndex: 0,
-          endColumnIndex: colCount,
+          endColumnIndex: 26,
         },
       },
     });
@@ -843,7 +831,7 @@ async function formatReports(
             startRowIndex: 0,
             endRowIndex: 1,
             startColumnIndex: 0,
-            endColumnIndex: 4,
+            endColumnIndex: 3,
           },
           mergeType: "MERGE_ALL",
         },
@@ -855,7 +843,7 @@ async function formatReports(
             startRowIndex: 1,
             endRowIndex: 2,
             startColumnIndex: 0,
-            endColumnIndex: 4,
+            endColumnIndex: 3,
           },
           mergeType: "MERGE_ALL",
         },
@@ -867,55 +855,7 @@ async function formatReports(
             startRowIndex: 2,
             endRowIndex: 3,
             startColumnIndex: 0,
-            endColumnIndex: 4,
-          },
-          mergeType: "MERGE_ALL",
-        },
-      },
-      {
-        mergeCells: {
-          range: {
-            sheetId: monthDetailId,
-            startRowIndex: groupRow,
-            endRowIndex: groupRow + 1,
-            startColumnIndex: 0,
-            endColumnIndex: 4,
-          },
-          mergeType: "MERGE_ALL",
-        },
-      },
-      {
-        mergeCells: {
-          range: {
-            sheetId: monthDetailId,
-            startRowIndex: groupRow,
-            endRowIndex: groupRow + 1,
-            startColumnIndex: 4,
-            endColumnIndex: 12,
-          },
-          mergeType: "MERGE_ALL",
-        },
-      },
-      {
-        mergeCells: {
-          range: {
-            sheetId: monthDetailId,
-            startRowIndex: groupRow,
-            endRowIndex: groupRow + 1,
-            startColumnIndex: 12,
-            endColumnIndex: 16,
-          },
-          mergeType: "MERGE_ALL",
-        },
-      },
-      {
-        mergeCells: {
-          range: {
-            sheetId: monthDetailId,
-            startRowIndex: groupRow,
-            endRowIndex: groupRow + 1,
-            startColumnIndex: 16,
-            endColumnIndex: 19,
+            endColumnIndex: 3,
           },
           mergeType: "MERGE_ALL",
         },
@@ -925,14 +865,13 @@ async function formatReports(
         horizontalAlignment: "LEFT",
       }),
       repeatFormat(monthDetailId, 1, 3, 0, colCount, subtitleFormat),
-      repeatFormat(monthDetailId, groupRow, groupRow + 1, 0, colCount, groupFormat),
       {
         updateSheetProperties: {
           properties: {
             sheetId: monthDetailId,
             gridProperties: {
               frozenRowCount: headerRow >= 0 ? headerRow + 1 : 5,
-              frozenColumnCount: 4,
+              frozenColumnCount: 3,
             },
           },
           fields:
@@ -979,36 +918,22 @@ async function formatReports(
         updateDimensionProperties: {
           range: {
             sheetId: monthDetailId,
-            dimension: "ROWS",
-            startIndex: groupRow,
-            endIndex: groupRow + 1,
-          },
-          properties: { pixelSize: 26 },
-          fields: "pixelSize",
-        },
-      },
-      {
-        updateDimensionProperties: {
-          range: {
-            sheetId: monthDetailId,
             dimension: "COLUMNS",
-            startIndex: 1,
-            endIndex: 2,
+            startIndex: 0,
+            endIndex: colCount,
           },
-          properties: { hiddenByUser: true },
+          properties: { hiddenByUser: false },
           fields: "hiddenByUser",
         },
       },
       dimensionWidth(monthDetailId, 0, 1, 92),
-      dimensionWidth(monthDetailId, 2, 3, 132),
-      dimensionWidth(monthDetailId, 3, 4, 218),
-      dimensionWidth(monthDetailId, 4, 11, 108),
-      dimensionWidth(monthDetailId, 11, 12, 96),
-      dimensionWidth(monthDetailId, 12, 15, 108),
-      dimensionWidth(monthDetailId, 15, 16, 96),
-      dimensionWidth(monthDetailId, 16, 18, 100),
-      dimensionWidth(monthDetailId, 18, 19, 82),
-      dimensionWidth(monthDetailId, 19, 20, 285)
+      dimensionWidth(monthDetailId, 1, 2, 160),
+      dimensionWidth(monthDetailId, 2, 3, 240),
+      dimensionWidth(monthDetailId, 3, 4, 120),
+      dimensionWidth(monthDetailId, 4, 5, 100),
+      dimensionWidth(monthDetailId, 5, 6, 170),
+      dimensionWidth(monthDetailId, 6, 7, 260),
+      dimensionWidth(monthDetailId, 7, 8, 330)
     );
 
     if (headerRow >= 0) {
@@ -1073,7 +998,7 @@ async function formatReports(
             foregroundColor: { red: 0.12, green: 0.31, blue: 0.27 },
           },
         }),
-        overlayFormat(monthDetailId, dataStart, dataEnd, 3, 4, {
+        overlayFormat(monthDetailId, dataStart, dataEnd, 2, 3, {
           textFormat: {
             bold: true,
             fontSize: 10,
@@ -1081,43 +1006,21 @@ async function formatReports(
           },
           wrapStrategy: "WRAP",
         }),
-        overlayFormat(monthDetailId, dataStart, dataEnd, 4, 19, {
+        overlayFormat(monthDetailId, dataStart, dataEnd, 3, 5, {
           horizontalAlignment: "RIGHT",
         }),
-        overlayNumberFormat(monthDetailId, dataStart, dataEnd, 1, 2, "0"),
-        overlayNumberFormat(monthDetailId, dataStart, dataEnd, 4, 11, monthMoney),
+        overlayNumberFormat(monthDetailId, dataStart, dataEnd, 3, 4, monthMoney),
         overlayNumberFormat(
           monthDetailId,
           dataStart,
           dataEnd,
-          11,
-          12,
+          4,
+          5,
           monthPercent,
           "PERCENT"
         ),
-        overlayNumberFormat(monthDetailId, dataStart, dataEnd, 12, 15, monthMoney),
-        overlayNumberFormat(
-          monthDetailId,
-          dataStart,
-          dataEnd,
-          15,
-          16,
-          monthPercent,
-          "PERCENT"
-        ),
-        overlayNumberFormat(monthDetailId, dataStart, dataEnd, 16, 18, monthCount),
-        overlayNumberFormat(
-          monthDetailId,
-          dataStart,
-          dataEnd,
-          18,
-          19,
-          monthPercent,
-          "PERCENT"
-        ),
-        overlayFormat(monthDetailId, dataStart, dataEnd, 19, 20, {
+        overlayFormat(monthDetailId, dataStart, dataEnd, 5, 8, {
           textFormat: {
-            italic: true,
             fontSize: 9,
             foregroundColor: { red: 0.35, green: 0.38, blue: 0.42 },
           },
@@ -1131,14 +1034,18 @@ async function formatReports(
                   sheetId: monthDetailId,
                   startRowIndex: dataStart,
                   endRowIndex: dataEnd,
-                  startColumnIndex: 14,
-                  endColumnIndex: 16,
+                  startColumnIndex: 3,
+                  endColumnIndex: 5,
                 },
               ],
               booleanRule: {
                 condition: {
-                  type: "NUMBER_LESS",
-                  values: [{ userEnteredValue: "0" }],
+                  type: "CUSTOM_FORMULA",
+                  values: [
+                    {
+                      userEnteredValue: `=AND($C${firstDataSheetRow}="Net profit",D${firstDataSheetRow}<0)`,
+                    },
+                  ],
                 },
                 format: {
                   backgroundColor: { red: 0.96, green: 0.8, blue: 0.8 },
@@ -1160,14 +1067,18 @@ async function formatReports(
                   sheetId: monthDetailId,
                   startRowIndex: dataStart,
                   endRowIndex: dataEnd,
-                  startColumnIndex: 14,
-                  endColumnIndex: 16,
+                  startColumnIndex: 3,
+                  endColumnIndex: 5,
                 },
               ],
               booleanRule: {
                 condition: {
-                  type: "NUMBER_GREATER",
-                  values: [{ userEnteredValue: "0" }],
+                  type: "CUSTOM_FORMULA",
+                  values: [
+                    {
+                      userEnteredValue: `=AND($C${firstDataSheetRow}="Net profit",D${firstDataSheetRow}>0)`,
+                    },
+                  ],
                 },
                 format: {
                   backgroundColor: { red: 0.82, green: 0.93, blue: 0.84 },
@@ -1185,18 +1096,18 @@ async function formatReports(
 
       let bandStart = dataStart;
       while (bandStart < dataEnd) {
-        const block = String(monthDetailValues[bandStart]?.[2] || "");
+        const block = String(monthDetailValues[bandStart]?.[1] || "");
         let bandEnd = bandStart + 1;
         while (
           bandEnd < dataEnd &&
-          String(monthDetailValues[bandEnd]?.[2] || "") === block
+          String(monthDetailValues[bandEnd]?.[1] || "") === block
         ) {
           bandEnd++;
         }
         const color = blockColors[block];
         if (color) {
           requests.push(
-            overlayFormat(monthDetailId, bandStart, bandEnd, 2, 3, {
+            overlayFormat(monthDetailId, bandStart, bandEnd, 1, 2, {
               backgroundColor: color,
               textFormat: {
                 bold: true,
@@ -1220,9 +1131,9 @@ async function formatReports(
       }
 
       for (let row = dataStart; row < dataEnd; row++) {
-        const block = String(monthDetailValues[row]?.[2] || "");
-        const line = String(monthDetailValues[row]?.[3] || "");
-        if (block === "01 · P&L" && line === "Month summary") {
+        const block = String(monthDetailValues[row]?.[1] || "");
+        const line = String(monthDetailValues[row]?.[2] || "");
+        if (block === "02 · Profit story" && line === "Net profit") {
           requests.push(
             overlayFormat(monthDetailId, row, row + 1, 0, colCount, pnlRowFormat)
           );

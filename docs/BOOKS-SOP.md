@@ -167,21 +167,23 @@ npm run books:sync:apply    # actually post + rebuild reports
 
 ### Month Detail
 
-Central month hub. It opens on the latest month by default; use the **Month** filter
-to switch periods. The context columns stay pinned while you scroll through the
-grouped financial, operating, activity, and notes columns:
+Central month story. It opens on the latest month by default; use the **Month**
+filter to switch periods. Read down the eight steps instead of scanning a wide
+accounting matrix. Every row uses the same simple columns: **PKR value**, **rate or
+mix**, **volume**, **comparison**, and **how to read it**.
 
-1. **P&L** — full operating summary (net profit highlights green/red)
-2. **Channel** — Shopify / Manual / Other Sales revenue, tax, COGS, gross profit
-3. **Tax** — output tax, taxable vs exempt/legacy revenue
-4. **Shopify route** — Courier / Booked ourselves / Gift & PR / Legacy
-5. **Gift & PR** — giveaway count and COGS impact (Rs 0 revenue)
-6. **Expenses** — Delivery vs Ads/ops categories
-7. **Top items** — top 5 by channel for that month
+1. **Snapshot** — net revenue, net profit, AOV, and revenue per unit
+2. **Profit story** — collected cash down to final profit, one deduction at a time
+3. **Revenue sources** — Shopify / Manual / Other Sales contribution and margin
+4. **Shopify operations** — delivery routes and delivery cost per order
+5. **Tax & expenses** — tax coverage and category-level operating spend
+6. **Gift & PR** — giveaway volume and product-cost impact
+7. **Best products** — top five products with revenue, units, profit, and mix
+8. **Decision cues** — momentum, profitability, concentration, and biggest expense
 
-Start with the dark **P&L summary** row, then scan the colored block labels down
-the left. Positive/negative net profit and margin cells are highlighted; zeroes
-display as dashes, and the hidden Year helper column keeps the working view clean.
+The final **Net profit** line is dark and its value/margin cells highlight positive
+or negative performance. Zeroes display as dashes, while deductions appear in
+parentheses so the profit bridge reads naturally.
 Use this before digging into raw **Ledger** lines. Rebuilds with
 `npm run books:reports:apply` (reports only) or the next full
 `npm run books:sync:apply`.

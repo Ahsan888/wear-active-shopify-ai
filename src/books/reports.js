@@ -83,7 +83,7 @@ function makeMonth(month) {
   };
 }
 
-const MONTH_DETAIL_HEADERS = [
+const MONTH_DETAIL_MATRIX_HEADERS = [
   "Month",
   "Year",
   "Block",
@@ -753,7 +753,7 @@ function buildAnalyticsValues(rollup, pipeline) {
   return rows;
 }
 
-function buildMonthDetailValues(rollup) {
+function buildMonthDetailMatrixValues(rollup) {
   const monthly = rollup.monthly || [];
   const rows = [
     ["MONTH DETAIL — OPERATING VIEW"],
@@ -785,7 +785,7 @@ function buildMonthDetailValues(rollup) {
       "",
       "NOTES",
     ],
-    MONTH_DETAIL_HEADERS,
+    MONTH_DETAIL_MATRIX_HEADERS,
   ];
 
   for (const month of monthly) {
@@ -1102,10 +1102,234 @@ function buildMonthDetailValues(rollup) {
   return rows;
 }
 
+const MONTH_DETAIL_HEADERS = [
+  "Month",
+  "Step",
+  "Metric",
+  "PKR value",
+  "Rate / mix",
+  "Volume",
+  "Comparison",
+  "How to read it",
+];
+
+const MONTH_DETAIL_STEPS = {
+  snapshot: "01 · Snapshot",
+  profit: "02 · Profit story",
+  channel: "03 · Revenue sources",
+  operations: "04 · Shopify operations",
+  costs: "05 · Tax & expenses",
+  gift: "06 · Gift & PR",
+  products: "07 · Best products",
+  decisions: "08 · Decision cues",
+};
+
+function monthDetailStoryRow(
+  month,
+  step,
+  metric,
+  value = "",
+  rate = "",
+  volume = "",
+  comparison = "",
+  meaning = ""
+) {
+  return [month, step, metric, value, rate, volume, comparison, meaning];
+}
+
+function monthChangeText(current, prior) {
+  if (!prior) return "No comparable prior month";
+  const change = current - prior;
+  const rate = change / Math.abs(prior);
+  const direction = change >= 0 ? "+" : "−";
+  return `${direction}Rs ${Math.round(Math.abs(change)).toLocaleString("en-US")} · ${direction}${Math.abs(rate * 100).toFixed(1)}% MoM`;
+}
+
+function buildMonthDetailValues(rollup) {
+  const monthly = rollup.monthly || [];
+  const rows = [
+    ["MONTH DETAIL — READ THE BUSINESS ONE STEP AT A TIME"],
+    ["Latest month is shown by default • Use the Month filter in A4 to switch periods"],
+    ["Follow steps 01–08 from snapshot to decisions • PKR, rates, volume and interpretation stay in consistent columns"],
+    MONTH_DETAIL_HEADERS,
+  ];
+
+  for (const [monthIndex, month] of monthly.entries()) {
+    const prior = monthIndex > 0 ? monthly[monthIndex - 1] : null;
+    const monthKeys = [month.month];
+    const channels = aggregateSalesStats(rollup.channelStats, monthKeys);
+    const routes = aggregateSalesStats(rollup.deliveryRouteStats, monthKeys);
+    const products = aggregateProducts(rollup.productStats || {}, monthKeys)
+      .filter((product) => product.revenue > 0)
+      .sort((a, b) => b.revenue - a.revenue);
+    const orderCount = month.orderCount || 0;
+    const unitCount = month.units || 0;
+    const taxableBase = month.taxableRevenue + month.untrackedRevenue;
+    const refundRate = pct(month.refunds, month.revenueExTax);
+    const cogsRate = pct(month.cogs, month.netRevenue);
+    const opexRate = pct(month.totalOpex, month.netRevenue);
+    const revenuePerUnit = pct(month.netRevenue, unitCount);
+    const deliveryOrderBase = month.courierOrderCount || orderCount;
+    const deliveryPerOrder = pct(month.deliveryExp, deliveryOrderBase);
+
+    rows.push(
+      monthDetailStoryRow(
+        month.month,
+        MONTH_DETAIL_STEPS.snapshot,
+        "Net revenue",
+        round2(month.netRevenue),
+        prior ? pct(month.netRevenue - prior.netRevenue, Math.abs(prior.netRevenue)) : "",
+        `${orderCount} orders · ${round2(unitCount)} units`,
+        monthChangeText(month.netRevenue, prior?.netRevenue),
+        "Sales after tax and refunds; the main scale measure"
+      ),
+      monthDetailStoryRow(
+        month.month,
+        MONTH_DETAIL_STEPS.snapshot,
+        "Net profit",
+        round2(month.netProfit),
+        month.netMargin,
+        "After all recorded costs",
+        monthChangeText(month.netProfit, prior?.netProfit),
+        month.netProfit >= 0 ? "The month is operating profitably" : "Costs exceeded gross profit"
+      ),
+      monthDetailStoryRow(
+        month.month,
+        MONTH_DETAIL_STEPS.snapshot,
+        "Average order value",
+        round2(month.aov),
+        "",
+        `${orderCount} orders`,
+        prior ? monthChangeText(month.aov, prior.aov) : "No comparable prior month",
+        "Net revenue earned per order"
+      ),
+      monthDetailStoryRow(
+        month.month,
+        MONTH_DETAIL_STEPS.snapshot,
+        "Revenue per unit",
+        round2(revenuePerUnit),
+        "",
+        `${round2(unitCount)} units`,
+        "",
+        "Average realized revenue per item sold"
+      )
+    );
+
+    rows.push(
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.profit, "Gross collected", round2(month.grossCollected), "", "", "Starting point", "Customer cash value before refunds"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.profit, "Less: output tax", round2(-month.outputTax), pct(month.outputTax, month.grossCollected), "", "", "Tax liability removed from collected value"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.profit, "Revenue ex-tax", round2(month.revenueExTax), "", "", "", "Revenue available before refunds and costs"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.profit, "Less: refunds", round2(-month.refunds), refundRate, "", "", refundRate > 0.05 ? "Refund pressure is above 5%" : "Refund impact is contained"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.profit, "Net revenue", round2(month.netRevenue), "", "", monthChangeText(month.netRevenue, prior?.netRevenue), "Revenue retained after tax and refunds"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.profit, "Less: product cost", round2(-month.cogs), cogsRate, "", "", "Cost of the products sold"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.profit, "Gross profit", round2(month.grossProfit), month.grossMargin, "", "", "Profit before delivery and operating expenses"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.profit, "Less: delivery expense", round2(-month.deliveryExp), pct(month.deliveryExp, month.netRevenue), `${deliveryOrderBase} delivery orders`, "", "Recorded courier and logistics expense"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.profit, "Less: other operating expense", round2(-month.otherExp), pct(month.otherExp, month.netRevenue), "", "", "Ads, operations and other recorded spend"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.profit, "Net profit", round2(month.netProfit), month.netMargin, "", monthChangeText(month.netProfit, prior?.netProfit), "What remains after every recorded cost")
+    );
+
+    for (const channel of ["Shopify", "Manual", "Other Sales"]) {
+      const value = channels[channel] || {};
+      const entries = channel === "Shopify" ? value.orders || 0 : value.transactions || 0;
+      rows.push(
+        monthDetailStoryRow(
+          month.month,
+          MONTH_DETAIL_STEPS.channel,
+          channel,
+          round2(value.revenue || 0),
+          pct(value.revenue || 0, month.revenueExTax),
+          `${entries} ${channel === "Shopify" ? "orders" : "entries"} · ${round2(value.units || 0)} units`,
+          `Gross profit Rs ${Math.round(value.grossProfit || 0).toLocaleString("en-US")} · GM ${((value.grossMargin || 0) * 100).toFixed(1)}%`,
+          "Revenue contribution and product economics"
+        )
+      );
+    }
+
+    for (const route of ["Courier", "Booked ourselves", "Gift / PR", "Legacy / unclassified"]) {
+      const value = routes[route] || {};
+      rows.push(
+        monthDetailStoryRow(
+          month.month,
+          MONTH_DETAIL_STEPS.operations,
+          route,
+          round2(value.revenue || 0),
+          pct(value.revenue || 0, month.revenueExTax),
+          `${value.orders || 0} orders · ${round2(value.units || 0)} units`,
+          "",
+          route === "Legacy / unclassified" ? "Older Shopify activity without a stored delivery route" : "How Shopify orders reached the customer"
+        )
+      );
+    }
+    rows.push(
+      monthDetailStoryRow(
+        month.month,
+        MONTH_DETAIL_STEPS.operations,
+        "Delivery cost per order",
+        round2(deliveryPerOrder),
+        "",
+        `${deliveryOrderBase} delivery orders`,
+        prior ? monthChangeText(deliveryPerOrder, pct(prior.deliveryExp, prior.courierOrderCount || prior.orderCount)) : "No comparable prior month",
+        "Directional delivery efficiency; lower is generally better"
+      )
+    );
+
+    rows.push(
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.costs, "Output tax accrued", round2(month.outputTax), pct(month.outputTax, month.grossCollected), "", "", "Tax-aware Ledger postings only"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.costs, "Taxable revenue", round2(month.taxableRevenue), pct(month.taxableRevenue, taxableBase), "", "", "Revenue with a matching Tax row"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.costs, "Exempt / legacy-untracked revenue", round2(month.untrackedRevenue), pct(month.untrackedRevenue, taxableBase), "", "", "Includes exempt activity and older gross-booked history")
+    );
+    const expenses = Object.entries(month.expenseByCategory || {}).sort((a, b) => b[1] - a[1]);
+    if (!expenses.length) {
+      rows.push(monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.costs, "No expenses posted", "", "", "", "", "Add Expense rows in Ledger or post recurring expenses"));
+    } else {
+      for (const [category, amount] of expenses) {
+        rows.push(monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.costs, category, round2(-amount), pct(amount, month.totalOpex), "", "Share of total operating expense", "Recorded operating spend"));
+      }
+    }
+
+    rows.push(
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.gift, "Gift / PR activity", 0, "", `${month.giftEntries || 0} entries · ${round2(month.giftUnits || 0)} units`, "", "No customer revenue is recorded"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.gift, "Gift / PR product cost", round2(-(month.giftCogs || 0)), pct(month.giftCogs || 0, month.cogs || 0), "", "", "Consumes inventory and reduces profit without revenue")
+    );
+
+    if (!products.length) {
+      rows.push(monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.products, "No product sales", "", "", "", "", "No product-level revenue was booked"));
+    } else {
+      for (const [index, product] of products.slice(0, 5).entries()) {
+        rows.push(
+          monthDetailStoryRow(
+            month.month,
+            MONTH_DETAIL_STEPS.products,
+            `${index + 1}. ${product.label}`,
+            round2(product.revenue),
+            pct(product.revenue, month.netRevenue),
+            `${round2(product.units)} units`,
+            `Gross profit Rs ${Math.round(product.grossProfit).toLocaleString("en-US")} · GM ${(product.grossMargin * 100).toFixed(1)}%`,
+            "Ranked by revenue for this month"
+          )
+        );
+      }
+    }
+
+    const channelEntries = Object.entries(channels).sort((a, b) => (b[1].revenue || 0) - (a[1].revenue || 0));
+    const largestChannel = channelEntries[0];
+    const largestExpense = expenses[0];
+    rows.push(
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.decisions, "Revenue momentum", round2(month.netRevenue), prior ? pct(month.netRevenue - prior.netRevenue, Math.abs(prior.netRevenue)) : "", "", monthChangeText(month.netRevenue, prior?.netRevenue), !prior ? "Build a prior-month baseline" : month.netRevenue >= prior.netRevenue ? "Revenue expanded month over month" : "Revenue contracted month over month"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.decisions, "Profitability", round2(month.netProfit), month.netMargin, "", `Operating expense rate ${(opexRate * 100).toFixed(1)}%`, month.netProfit >= 0 ? "Protect margin while scaling revenue" : "Review product margin and operating spend"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.decisions, "Largest revenue source", round2(largestChannel?.[1]?.revenue || 0), pct(largestChannel?.[1]?.revenue || 0, month.revenueExTax), largestChannel?.[0] || "No channel", "", "Shows channel concentration and dependency"),
+      monthDetailStoryRow(month.month, MONTH_DETAIL_STEPS.decisions, "Largest operating expense", largestExpense ? round2(-largestExpense[1]) : "", largestExpense ? pct(largestExpense[1], month.totalOpex) : "", largestExpense?.[0] || "No expense", "", largestExpense ? "First cost category to investigate for savings" : "No operating expense was posted")
+    );
+  }
+
+  return rows;
+}
+
 module.exports = {
   PNL_HEADERS,
   MONTH_DETAIL_HEADERS,
   MONTH_DETAIL_BLOCKS,
+  MONTH_DETAIL_STEPS,
   rollupLedger,
   buildDashboardValues,
   buildAnalyticsValues,
