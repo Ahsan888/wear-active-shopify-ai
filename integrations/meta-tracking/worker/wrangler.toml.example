@@ -1,0 +1,38 @@
+name = "wear-active-meta-tracking-staging"
+main = "src/index.mjs"
+compatibility_date = "2026-09-01"
+
+[[d1_databases]]
+binding = "TRACKING_DB"
+database_name = "wear-active-meta-tracking-staging"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[[queues.producers]]
+binding = "PURCHASE_QUEUE"
+queue = "wear-active-meta-purchases-staging"
+
+[[queues.consumers]]
+queue = "wear-active-meta-purchases-staging"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "wear-active-meta-purchases-staging-dlq"
+
+[triggers]
+crons = ["17 2 * * *"]
+
+[vars]
+META_PIXEL_ID = "1021212370935578"
+META_API_VERSION = "v23.0"
+STOREFRONT_DOMAIN = "wearactive.pk"
+PIXEL_ALLOWED_ORIGINS = "https://wearactive.pk,https://www.wearactive.pk,null"
+PURCHASE_QUEUE_DELAY_SECONDS = "20"
+META_CONTENT_ID_MODE = "variant_id"
+META_CATALOG_COUNTRY = "PK"
+DEFAULT_PHONE_COUNTRY_CODE = "92"
+
+# Configure these as encrypted Worker secrets, never vars:
+# META_ACCESS_TOKEN
+# SHOPIFY_WEBHOOK_SECRET
+# PIXEL_INGEST_KEY
+# META_TEST_EVENT_CODE (staging only)

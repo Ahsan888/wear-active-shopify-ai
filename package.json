@@ -41,6 +41,13 @@
     "meta:report": "node src/scripts/meta-report.js",
     "meta:report:full": "node src/scripts/meta-report-full.js",
     "meta:test": "node src/scripts/meta-self-test.js",
+    "meta:tracking:test": "node --test integrations/meta-tracking/worker/test/*.test.mjs",
+    "meta:tracking:staging-smoke": "node src/scripts/meta-tracking-staging-smoke.js",
+    "meta:tracking:webhook": "node src/scripts/meta-tracking-webhook.js",
+    "meta:tracking:webhook:apply": "node src/scripts/meta-tracking-webhook.js --apply",
+    "meta:tracking:webhook:delete": "node src/scripts/meta-tracking-webhook.js --delete",
+    "meta:tracking:webhook:production": "node src/scripts/meta-tracking-webhook.js --production",
+    "meta:tracking:webhook:production:apply": "node src/scripts/meta-tracking-webhook.js --production --apply",
     "ads:audit": "node src/scripts/ads-audit.js",
     "ads:audit:test": "node src/scripts/ads-audit-self-test.js",
     "reports:merge": "node src/scripts/merge-reports.js",
@@ -97,5 +104,8 @@
     "dotenv": "^17.4.2",
     "google-auth-library": "^11.0.2",
     "googleapis": "^178.0.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.135.0"
   }
 }

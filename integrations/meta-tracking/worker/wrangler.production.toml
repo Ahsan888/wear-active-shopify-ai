@@ -1,0 +1,38 @@
+name = "wear-active-meta-tracking-production"
+main = "src/index.mjs"
+compatibility_date = "2026-09-01"
+
+[[d1_databases]]
+binding = "TRACKING_DB"
+database_name = "wear-active-meta-tracking-production"
+database_id = "2ed6768d-7a2d-4e4b-ae92-2efe2c18d1f6"
+
+[[queues.producers]]
+binding = "PURCHASE_QUEUE"
+queue = "wear-active-meta-purchases-production"
+
+[[queues.consumers]]
+queue = "wear-active-meta-purchases-production"
+max_batch_size = 10
+max_batch_timeout = 5
+max_retries = 5
+dead_letter_queue = "wear-active-meta-purchases-production-dlq"
+
+[triggers]
+crons = ["17 2 * * *"]
+
+[vars]
+META_PIXEL_ID = "1741415000546640"
+META_API_VERSION = "v23.0"
+STOREFRONT_DOMAIN = "wearactive.pk"
+PIXEL_ALLOWED_ORIGINS = "https://wearactive.pk,https://www.wearactive.pk,null"
+PURCHASE_QUEUE_DELAY_SECONDS = "20"
+META_CONTENT_ID_MODE = "variant_id"
+META_CATALOG_COUNTRY = "PK"
+DEFAULT_PHONE_COUNTRY_CODE = "92"
+
+# Encrypted Worker secrets configured separately:
+# META_ACCESS_TOKEN
+# SHOPIFY_WEBHOOK_SECRET
+# PIXEL_INGEST_KEY
+# Do not configure META_TEST_EVENT_CODE in production.
